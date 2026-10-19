@@ -1,0 +1,80 @@
+# Public portfolio allowlist. Unlisted root paths stay local.
+/*
+!/.gitignore
+!/.gitattributes
+!/DeftBlade.uproject
+
+# First-party C++ implementations, including Source/Private, are reviewable.
+!/Source/
+!/Source/**
+
+# Only shared, reviewed project settings.
+!/Config/
+/Config/*
+!/Config/DefaultEngine.ini
+!/Config/DefaultGame.ini
+!/Config/DefaultInput.ini
+
+# First-party Unreal assets only; external packs belong in Content/ThirdParty.
+!/Content/
+/Content/*
+!/Content/DeftBlade/
+!/Content/DeftBlade/**
+
+# Explicit public utility boundaries. Documentation remains local.
+!/Tools/
+/Tools/*
+!/Tools/Public/
+!/Tools/Public/**
+!/.githooks/
+!/.githooks/**
+
+# Only our named plugin is eligible for publication.
+!/Plugins/
+/Plugins/*
+!/Plugins/DeftBladeTools/
+!/Plugins/DeftBladeTools/**
+
+# These exclusions apply even inside otherwise-public paths.
+**/Binaries/
+**/Intermediate/
+**/Saved/
+**/DerivedDataCache/
+**/Developers/
+**/ThirdParty/
+**/External/
+**/PrivateNotes/
+**/CourseOriginals/
+**/.vs/
+**/.idea/
+**/.vscode/
+**/.codex/
+**/.claude/
+**/.aws/
+**/.ssh/
+**/.env*
+**/.mcp.json
+**/*local.ini
+**/*.local.*
+**/*.sln
+**/*.suo
+**/*.user
+**/*.vcxproj*
+**/*.pdb
+**/*.dll
+**/*.exe
+**/*.obj
+**/*.log
+**/*.pem
+**/*.key
+**/*.pfx
+**/*.p12
+**/*.zip
+**/*.7z
+**/*.pak
+**/*.utoc
+**/*.ucas
+
+# Markdown stays local. Only the empty root README is tracked for now.
+*.[mM][dD]
+!/README.md
