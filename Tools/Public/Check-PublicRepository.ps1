@@ -28,7 +28,7 @@ $allowedPatterns = @(
     ('^Plugins/' + $escapedName + 'Tools/[A-Za-z0-9_./-]+\.(uplugin|cpp|h|hpp|inl|cs|ini|uasset|umap)$')
 )
 $blockedPatterns = @(
-    '(^|/)(Binaries|Intermediate|Saved|DerivedDataCache|Developers|ThirdParty|External|PrivateNotes|CourseOriginals)(/|$)',
+    '(^|/)(Tests|Binaries|Intermediate|Saved|DerivedDataCache|Developers|ThirdParty|External|PrivateNotes|CourseOriginals)(/|$)',
     '(^|/)(\.codex|\.claude|\.aws|\.ssh|\.vs|\.idea|\.vscode)(/|$)',
     '(^|/)\.env[^/]*$', '(^|/)\.mcp\.json$',
     '\.local\.', 'local\.ini$', '\.(pem|key|pfx|p12|pdb|dll|exe|log|zip|7z|pak|utoc|ucas)$',

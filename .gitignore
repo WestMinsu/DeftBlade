@@ -36,6 +36,8 @@
 !/Plugins/DeftBladeTools/**
 
 # These exclusions apply even inside otherwise-public paths.
+# Automated tests stay local.
+**/[Tt]ests/
 **/Binaries/
 **/Intermediate/
 **/Saved/
