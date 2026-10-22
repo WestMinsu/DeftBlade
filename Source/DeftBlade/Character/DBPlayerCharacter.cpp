@@ -1,6 +1,7 @@
 #include "Character/DBPlayerCharacter.h"
 
 #include "Camera/CameraComponent.h"
+#include "Combat/DBCombatComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -41,6 +42,9 @@ ADBPlayerCharacter::ADBPlayerCharacter()
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
 	FollowCamera->bUsePawnControlRotation = false;
 	FollowCamera->FieldOfView = 90.0f;
+
+	CombatComponent = CreateDefaultSubobject<UDBCombatComponent>(TEXT("Combat"));
+	Movement->AddTickPrerequisiteComponent(CombatComponent);
 }
 
 void ADBPlayerCharacter::BeginPlay()
@@ -59,9 +63,9 @@ void ADBPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 		UE_LOG(LogDBPlayer, Error, TEXT("%s requires an EnhancedInputComponent."), *GetName());
 		return;
 	}
-	if (!MoveAction || !GamepadMoveAction || !MouseLookAction || !GamepadLookAction || !JumpAction || !WalkAction)
+	if (!MoveAction || !GamepadMoveAction || !MouseLookAction || !GamepadLookAction || !JumpAction || !WalkAction || !EvadeAction)
 	{
-		UE_LOG(LogDBPlayer, Error, TEXT("Assign all six input actions on %s's Blueprint defaults."), *GetName());
+		UE_LOG(LogDBPlayer, Error, TEXT("Assign all seven input actions on %s's Blueprint defaults."), *GetName());
 		return;
 	}
 
@@ -77,6 +81,7 @@ void ADBPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	Input->BindAction(WalkAction, ETriggerEvent::Started, this, &ThisClass::StartWalking);
 	Input->BindAction(WalkAction, ETriggerEvent::Completed, this, &ThisClass::StopWalking);
 	Input->BindAction(WalkAction, ETriggerEvent::Canceled, this, &ThisClass::StopWalking);
+	Input->BindAction(EvadeAction, ETriggerEvent::Started, CombatComponent.Get(), &UDBCombatComponent::RequestEvade);
 }
 
 void ADBPlayerCharacter::Move(const FInputActionValue& Value)
@@ -172,6 +177,7 @@ void ADBPlayerCharacter::PawnClientRestart()
 {
 	Super::PawnClientRestart();
 	AddMappingContext();
+	CombatComponent->AddTickPrerequisiteActor(Controller);
 	if (!bInitialCameraRotationApplied && IsLocallyControlled())
 	{
 		// GameMode sets ControlRotation after possession; apply the starting pitch afterward.
@@ -229,6 +235,8 @@ void ADBPlayerCharacter::ReleaseMappingContext()
 
 void ADBPlayerCharacter::UnPossessed()
 {
+	CombatComponent->ResetCombat();
+	CombatComponent->RemoveTickPrerequisiteActor(Controller);
 	StopJumping();
 	ResetMovementInput();
 	ReleaseMappingContext();

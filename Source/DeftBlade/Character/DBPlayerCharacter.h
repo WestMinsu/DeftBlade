@@ -5,6 +5,7 @@
 #include "DBPlayerCharacter.generated.h"
 
 class UCameraComponent;
+class UDBCombatComponent;
 class UInputAction;
 class UInputMappingContext;
 class USpringArmComponent;
@@ -31,6 +32,9 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
 	TObjectPtr<UCameraComponent> FollowCamera;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+	TObjectPtr<UDBCombatComponent> CombatComponent;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputMappingContext> GameplayMappingContext;
 
@@ -51,6 +55,9 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> WalkAction;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> EvadeAction;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Movement", meta = (ClampMin = "0"))
 	float RunSpeed = 600.0f;
