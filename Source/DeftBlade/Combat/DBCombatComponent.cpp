@@ -16,6 +16,13 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogDBCombat, Log, All);
 
+bool FDBAttackDefinition::IsValid() const
+{
+	return Montage && FMath::IsFinite(PlayRate) && PlayRate > 0.0f
+		&& FMath::IsFinite(ActiveStart) && FMath::IsFinite(ActiveEnd)
+		&& ActiveStart >= 0.0f && ActiveEnd > ActiveStart && ActiveEnd < Montage->GetPlayLength();
+}
+
 UDBCombatComponent::UDBCombatComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
@@ -61,12 +68,23 @@ void UDBCombatComponent::RequestEvade()
 	{
 		// A rejected air press must not replay automatically on landing.
 		bAirEvadeUsed = true;
-		BufferedEvade = {};
+		BufferedAction = {};
 		return;
 	}
-	BufferedEvade = {++NextRequestId, GetWorld()->GetTimeSeconds()};
+	BufferedAction = {++NextRequestId, GetWorld()->GetTimeSeconds(), EDBActionState::Evade};
 	UE_LOG(LogDBCombat, Verbose, TEXT("%s queued #%llu at %.3f"), *GetOwner()->GetName(),
-		BufferedEvade.Id, BufferedEvade.ReceivedAt);
+		BufferedAction.Id, BufferedAction.ReceivedAt);
+}
+
+void UDBCombatComponent::RequestAttack(bool bHeavy)
+{
+	if (!CanProcessInput()) { ResetCombat(); return; }
+	// Air attacks join later. A rejected press must never replay on landing.
+	if (!CastChecked<ACharacter>(GetOwner())->GetCharacterMovement()->IsMovingOnGround()) { return; }
+	const double Now = GetWorld()->GetTimeSeconds();
+	if (BufferedAction.Action == EDBActionState::Evade && BufferedAction.Id != 0
+		&& (ActionState == EDBActionState::Evade || !BufferedAction.IsExpired(Now, InputBufferLifetime))) { return; }
+	BufferedAction = {++NextRequestId, Now, bHeavy ? EDBActionState::HeavyAttack : EDBActionState::LightAttack};
 }
 
 bool UDBCombatComponent::TryTransitionToSprint()
@@ -77,7 +95,7 @@ bool UDBCombatComponent::TryTransitionToSprint()
 		Character->GetPendingMovementInputVector().GetSafeNormal2D(), Character->GetActorForwardVector()) > 0.0;
 	const double HandoffTime = bLeavingBackward ? InvulnerabilityEnd : FMath::Max(SprintTransitionStart + HeldSlideTime, InvulnerabilityEnd);
 	if (!CanProcessInput() || !Movement->IsMovingOnGround() || ActionState != EDBActionState::Evade
-		|| EvadeMotionId == 0 || BufferedEvade.Id != 0 || GetWorld()->GetTimeSeconds() >= MovementEndsAt
+		|| EvadeMotionId == 0 || BufferedAction.Id != 0 || GetWorld()->GetTimeSeconds() >= MovementEndsAt
 		|| GetWorld()->GetTimeSeconds() < ActionStartedAt + HandoffTime)
 	{
 		return false;
@@ -116,22 +134,37 @@ void UDBCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		bAirEvadeUsed = true;
 	}
 	// Reserve one follow-up throughout this evade, including its animation recovery.
-	if (ActionState != EDBActionState::Evade && BufferedEvade.IsExpired(Now, InputBufferLifetime))
+	if (!(ActionState == EDBActionState::Evade && BufferedAction.Action == EDBActionState::Evade)
+		&& BufferedAction.IsExpired(Now, InputBufferLifetime))
 	{
-		UE_LOG(LogDBCombat, Verbose, TEXT("%s expired #%llu at %.3f"), *GetOwner()->GetName(), BufferedEvade.Id, Now);
-		BufferedEvade = {};
+		UE_LOG(LogDBCombat, Verbose, TEXT("%s expired #%llu at %.3f"), *GetOwner()->GetName(), BufferedAction.Id, Now);
+		BufferedAction = {};
 	}
-	const bool bCanChain = ActionState == EDBActionState::Evade && Now >= ChainStartsAt;
-	if (BufferedEvade.Id != 0 && (bCanChain || (ActionState == EDBActionState::None && !IsEvadeMontageActive())))
+	const bool bCanChain = ActionState == EDBActionState::Evade && BufferedAction.Action == EDBActionState::Evade && Now >= ChainStartsAt;
+	if (BufferedAction.Id != 0 && (bCanChain || (ActionState == EDBActionState::None && !IsEvadeMontageActive())))
 	{
 		// Start at the authored recovery gate, keeping its remaining momentum.
-		TryStartEvade(Now);
+		if (BufferedAction.Action == EDBActionState::Evade) { TryStartEvade(Now); }
+		else { TryStartAttack(); }
+	}
+	if (IsAttacking())
+	{
+		ACharacter* Character = CastChecked<ACharacter>(GetOwner());
+		UAnimInstance* Anim = Character->GetMesh()->GetAnimInstance();
+		FAnimMontageInstance* Instance = Anim ? Anim->GetMontageInstanceForID(AttackMontageInstanceId) : nullptr;
+		if (!Instance || !Character->GetCharacterMovement()->IsMovingOnGround()) { FinishAction(ActiveActionId); }
+		else
+		{
+			SampleAttackWindow(Instance->GetPosition());
+			// Root-motion animation owns translation and facing until recovery ends.
+			Character->ConsumeMovementInputVector();
+		}
 	}
 	if (ActionState == EDBActionState::Evade)
 	{
 		UpdateEvadeMovement(DeltaTime);
 	}
-	if (ActionState == EDBActionState::Evade && bBlendingToSprint && !bEvadeHeld && BufferedEvade.Id == 0)
+	if (ActionState == EDBActionState::Evade && bBlendingToSprint && !bEvadeHeld && BufferedAction.Id == 0)
 	{
 		// A late release finishes the locomotion blend without zeroing its momentum.
 		StopEvadeMovement(false);
@@ -177,7 +210,7 @@ void UDBCombatComponent::UpdateEvadeMovement(float DeltaTime)
 
 	// Stretch only the glide, preserving push-off, recovery and the wall-clock i-frame interval.
 	const double PoseTime = GetWorld()->GetTimeSeconds() - ActionStartedAt - HeldSlideTime;
-	const double ExtraTime = bEvadeHeld && !Direction.IsNearlyZero() && BufferedEvade.Id == 0
+	const double ExtraTime = bEvadeHeld && !Direction.IsNearlyZero() && BufferedAction.Id == 0
 		&& PoseTime >= 0.18 && PoseTime < SprintTransitionStart
 		? FMath::Min(DeltaTime * 0.5, FMath::Max(0.0, MaxHeldSlideTime - HeldSlideTime)) : 0.0;
 	if (ExtraTime > 0.0)
@@ -190,7 +223,7 @@ void UDBCombatComponent::UpdateEvadeMovement(float DeltaTime)
 	}
 	UCurveFloat* Curve = bBackwardEvade && BackwardEvadeStrengthCurve ? BackwardEvadeStrengthCurve : EvadeStrengthCurve;
 	float Speed = EvadeSpeed * (Curve ? Curve->GetFloatValue(FMath::Clamp(Motion->GetTime() / Motion->Duration, 0.0f, 1.0f)) : 1.0f);
-	const bool bHeldForward = bEvadeHeld && !bBackwardEvade && !Direction.IsNearlyZero() && BufferedEvade.Id == 0;
+	const bool bHeldForward = bEvadeHeld && !bBackwardEvade && !Direction.IsNearlyZero() && BufferedAction.Id == 0;
 	if (bHeldForward && PoseTime >= 0.18)
 	{
 		// Coast into locomotion speed instead of braking to a near stop and accelerating again.
@@ -230,7 +263,7 @@ void UDBCombatComponent::TryStartEvade(double Now)
 	}
 	if (Movement->IsFalling() && bAirEvadeUsed)
 	{
-		BufferedEvade = {};
+		BufferedAction = {};
 		return;
 	}
 	FVector Direction = Character->GetPendingMovementInputVector().GetSafeNormal2D();
@@ -276,13 +309,13 @@ void UDBCombatComponent::TryStartEvade(double Now)
 	{
 		bAirEvadeUsed = true;
 	}
-	ActiveActionId = BufferedEvade.Id;
+	ActiveActionId = BufferedAction.Id;
 	ActionStartedAt = Now;
 	HeldSlideTime = 0.0;
 	MovementEndsAt = Now + Duration;
 	ChainStartsAt = Now + ChainStart;
 	ActionState = EDBActionState::Evade;
-	BufferedEvade = {};
+	BufferedAction = {};
 	if (!bBackwardEvade)
 	{
 		Character->SetActorRotation(Direction.Rotation());
@@ -313,13 +346,14 @@ bool UDBCombatComponent::FinishAction(uint64 ExpectedActionId, bool bInterrupted
 	{
 		return false;
 	}
-	UE_LOG(LogDBCombat, Log, TEXT("%s finished Evade #%llu at %.3f"),
+	UE_LOG(LogDBCombat, Log, TEXT("%s finished action #%llu at %.3f"),
 		*GetOwner()->GetName(), ActiveActionId, GetWorld()->GetTimeSeconds());
 	StopEvadeMovement();
+	StopAttackMontage();
 	if (bInterrupted)
 	{
 		StopEvadeMontage();
-		BufferedEvade = {};
+		BufferedAction = {};
 	}
 	ActionState = EDBActionState::None;
 	ActiveActionId = 0;
@@ -329,6 +363,91 @@ bool UDBCombatComponent::FinishAction(uint64 ExpectedActionId, bool bInterrupted
 	HeldSlideTime = 0.0;
 	bBlendingToSprint = false;
 	return true;
+}
+
+void UDBCombatComponent::TryStartAttack()
+{
+	ACharacter* Character = CastChecked<ACharacter>(GetOwner());
+	const FDBAttackDefinition& Definition = BufferedAction.Action == EDBActionState::HeavyAttack ? HeavyAttack : LightAttack;
+	UAnimInstance* Anim = Character->GetMesh()->GetAnimInstance();
+	if (!Character->GetCharacterMovement()->IsMovingOnGround() || !Anim || !Definition.IsValid())
+	{
+		BufferedAction = {};
+		return;
+	}
+	if (Anim->Montage_Play(Definition.Montage, Definition.PlayRate) <= 0.0f)
+	{
+		BufferedAction = {};
+		return;
+	}
+	FAnimMontageInstance* Instance = Anim->GetActiveInstanceForMontage(Definition.Montage);
+	check(Instance);
+	ActiveAttack = Definition;
+	AttackMontageInstanceId = Instance->GetInstanceID();
+	PreviousAttackPosition = 0.0f;
+	ActiveActionId = BufferedAction.Id;
+	ActionState = BufferedAction.Action;
+	BufferedAction = {};
+	Character->StopJumping();
+	Character->GetCharacterMovement()->StopMovementImmediately();
+	Instance->OnMontageBlendingOutStarted.BindUObject(this, &ThisClass::AttackBlendingOut, ActiveActionId);
+	Instance->OnMontageEnded.BindUObject(this, &ThisClass::AttackEnded, ActiveActionId);
+}
+
+void UDBCombatComponent::SampleAttackWindow(float Position)
+{
+	if (ActiveAttack.OverlapsActiveWindow(PreviousAttackPosition, Position))
+	{
+		const float From = FMath::Max(PreviousAttackPosition, ActiveAttack.ActiveStart);
+		const float To = FMath::Min(Position, ActiveAttack.ActiveEnd);
+		PreviousAttackPosition = Position;
+		OnAttackWindowTraversed.Broadcast(From, To);
+	}
+	else { PreviousAttackPosition = Position; }
+}
+
+bool UDBCombatComponent::IsAttackWindowOpen() const
+{
+	return IsAttacking() && PreviousAttackPosition >= ActiveAttack.ActiveStart && PreviousAttackPosition < ActiveAttack.ActiveEnd;
+}
+
+void UDBCombatComponent::AttackBlendingOut(UAnimMontage* Montage, bool bInterrupted, uint64 ActionId)
+{
+	if (ActionId != ActiveActionId || !IsAttacking()) { return; }
+	if (bInterrupted) { FinishAction(ActionId); return; }
+	// The instance remains addressable by ID during blend-out, unlike the active montage map.
+	if (UAnimInstance* Anim = CastChecked<ACharacter>(GetOwner())->GetMesh()->GetAnimInstance())
+	{
+		if (FAnimMontageInstance* Instance = Anim->GetMontageInstanceForID(AttackMontageInstanceId))
+		{
+			SampleAttackWindow(Instance->GetPosition());
+		}
+	}
+}
+
+void UDBCombatComponent::AttackEnded(UAnimMontage* Montage, bool bInterrupted, uint64 ActionId)
+{
+	if (ActionId != ActiveActionId || !IsAttacking()) { return; }
+	if (!bInterrupted) { SampleAttackWindow(ActiveAttack.Montage->GetPlayLength()); }
+	FinishAction(ActionId, bInterrupted);
+}
+
+void UDBCombatComponent::StopAttackMontage()
+{
+	if (AttackMontageInstanceId == INDEX_NONE) { return; }
+	UAnimInstance* Anim = CastChecked<ACharacter>(GetOwner())->GetMesh()->GetAnimInstance();
+	FAnimMontageInstance* Instance = Anim ? Anim->GetMontageInstanceForID(AttackMontageInstanceId) : nullptr;
+	AttackMontageInstanceId = INDEX_NONE;
+	ActiveAttack = {};
+	PreviousAttackPosition = 0.0f;
+	if (Instance)
+	{
+		Instance->OnMontageBlendingOutStarted.Unbind();
+		Instance->OnMontageEnded.Unbind();
+		// An interrupted pose may fade, but its attack displacement must stop now.
+		Instance->PushDisableRootMotion();
+		if (Instance->IsPlaying()) { Instance->Stop(FAlphaBlend(0.10f), true); }
+	}
 }
 
 bool UDBCombatComponent::IsEvadeMontageActive() const
@@ -375,15 +494,15 @@ void UDBCombatComponent::StopEvadeMontage()
 
 void UDBCombatComponent::ResetCombat()
 {
-	if (ActiveActionId != 0 || BufferedEvade.Id != 0)
+	if (ActiveActionId != 0 || BufferedAction.Id != 0)
 	{
 		UE_LOG(LogDBCombat, Verbose, TEXT("%s reset active #%llu / pending #%llu"),
-			*GetOwner()->GetName(), ActiveActionId, BufferedEvade.Id);
+			*GetOwner()->GetName(), ActiveActionId, BufferedAction.Id);
 	}
 	FinishAction(ActiveActionId, false);
 	// Reset also stops any residual blend-out after an interruption.
 	StopEvadeMontage();
-	BufferedEvade = {};
+	BufferedAction = {};
 	bEvadeHeld = false;
 }
 

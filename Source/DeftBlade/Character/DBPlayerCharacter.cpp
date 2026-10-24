@@ -3,6 +3,8 @@
 #include "Camera/CameraComponent.h"
 #include "Combat/DBCombatComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "EnhancedPlayerInput.h"
@@ -49,6 +51,9 @@ ADBPlayerCharacter::ADBPlayerCharacter()
 
 	CombatComponent = CreateDefaultSubobject<UDBCombatComponent>(TEXT("Combat"));
 	Movement->AddTickPrerequisiteComponent(CombatComponent);
+	WeaponMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponMesh"));
+	WeaponMesh->SetupAttachment(GetMesh(), TEXT("WeaponSocket"));
+	WeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
 void ADBPlayerCharacter::BeginPlay()
@@ -61,6 +66,11 @@ bool ADBPlayerCharacter::CanJumpWhileFalling() const
 {
 	// Walking off a ledge does not consume the first jump.
 	return true;
+}
+
+bool ADBPlayerCharacter::CanJumpInternal_Implementation() const
+{
+	return !CombatComponent->IsAttacking() && Super::CanJumpInternal_Implementation();
 }
 
 void ADBPlayerCharacter::OnJumped_Implementation()
@@ -113,9 +123,10 @@ void ADBPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 		UE_LOG(LogDBPlayer, Error, TEXT("%s requires an EnhancedInputComponent."), *GetName());
 		return;
 	}
-	if (!MoveAction || !GamepadMoveAction || !MouseLookAction || !GamepadLookAction || !JumpAction || !WalkAction || !EvadeAction)
+	if (!MoveAction || !GamepadMoveAction || !MouseLookAction || !GamepadLookAction || !JumpAction || !WalkAction || !EvadeAction
+		|| !LightAttackAction || !HeavyAttackAction)
 	{
-		UE_LOG(LogDBPlayer, Error, TEXT("Assign all seven input actions on %s's Blueprint defaults."), *GetName());
+		UE_LOG(LogDBPlayer, Error, TEXT("Assign all nine input actions on %s's Blueprint defaults."), *GetName());
 		return;
 	}
 
@@ -136,6 +147,20 @@ void ADBPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	Input->BindAction(EvadeAction, ETriggerEvent::Started, CombatComponent.Get(), &UDBCombatComponent::RequestEvade);
 	Input->BindAction(EvadeAction, ETriggerEvent::Completed, this, &ThisClass::StopSprinting);
 	Input->BindAction(EvadeAction, ETriggerEvent::Canceled, this, &ThisClass::StopSprinting);
+	Input->BindAction(LightAttackAction, ETriggerEvent::Started, this, &ThisClass::LightAttack);
+	Input->BindAction(HeavyAttackAction, ETriggerEvent::Started, this, &ThisClass::HeavyAttack);
+}
+
+void ADBPlayerCharacter::LightAttack()
+{
+	StopSprinting();
+	CombatComponent->RequestAttack(false);
+}
+
+void ADBPlayerCharacter::HeavyAttack()
+{
+	StopSprinting();
+	CombatComponent->RequestAttack(true);
 }
 
 void ADBPlayerCharacter::Move(const FInputActionValue& Value)

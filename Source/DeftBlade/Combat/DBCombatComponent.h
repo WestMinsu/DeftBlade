@@ -11,12 +11,14 @@ UENUM(BlueprintType)
 enum class EDBActionState : uint8
 {
 	None,
-	Evade
+	Evade,
+	LightAttack,
+	HeavyAttack
 };
 
 /** One deliberate press. Id == 0 means the slot is empty. */
 USTRUCT()
-struct FDBBufferedEvade
+struct FDBBufferedAction
 {
 	GENERATED_BODY()
 
@@ -26,11 +28,41 @@ struct FDBBufferedEvade
 	UPROPERTY(VisibleAnywhere)
 	double ReceivedAt = 0.0;
 
+	UPROPERTY(VisibleAnywhere)
+	EDBActionState Action = EDBActionState::None;
+
 	bool IsExpired(double Now, double Lifetime) const
 	{
 		return Id != 0 && Now >= ReceivedAt + Lifetime;
 	}
 };
+
+/** Times are montage seconds, independent of playback rate. */
+USTRUCT(BlueprintType)
+struct FDBAttackDefinition
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere)
+	TObjectPtr<UAnimMontage> Montage;
+
+	UPROPERTY(EditAnywhere, meta = (ClampMin = "0.01"))
+	float PlayRate = 1.0f;
+
+	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"))
+	float ActiveStart = 0.15f;
+
+	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"))
+	float ActiveEnd = 0.35f;
+
+	bool IsValid() const;
+	bool OverlapsActiveWindow(float Previous, float Current) const
+	{
+		return Current > Previous && Previous < ActiveEnd && Current > ActiveStart;
+	}
+};
+
+DECLARE_MULTICAST_DELEGATE_TwoParams(FDBAttackWindowTraversed, float, float);
 
 /** Owns action lifetime, one buffered input and finite ground/air evades. */
 UCLASS(ClassGroup = (DeftBlade), meta = (BlueprintSpawnableComponent))
@@ -42,6 +74,7 @@ public:
 	UDBCombatComponent();
 
 	void RequestEvade();
+	void RequestAttack(bool bHeavy);
 	void SetEvadeHeld(bool bHeld, float SprintSpeed) { bEvadeHeld = bHeld; HeldGlideSpeed = SprintSpeed; }
 	bool TryTransitionToSprint();
 	void ResetAirEvade() { bAirEvadeUsed = false; }
@@ -53,7 +86,11 @@ public:
 
 	EDBActionState GetActionState() const { return ActionState; }
 	uint64 GetActiveActionId() const { return ActiveActionId; }
-	const FDBBufferedEvade& GetBufferedEvade() const { return BufferedEvade; }
+	const FDBBufferedAction& GetBufferedAction() const { return BufferedAction; }
+	bool IsAttacking() const { return ActionState == EDBActionState::LightAttack || ActionState == EDBActionState::HeavyAttack; }
+	bool IsAttackWindowOpen() const;
+	/** Swept montage-time interval; a long frame crossing the whole window still emits once. */
+	FDBAttackWindowTraversed OnAttackWindowTraversed;
 
 protected:
 	virtual void BeginPlay() override;
@@ -63,6 +100,12 @@ protected:
 	/** Idle expiry; an active evade retains one follow-up until it can chain. */
 	UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0.01"))
 	double InputBufferLifetime = 0.18;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Attack")
+	FDBAttackDefinition LightAttack;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Attack")
+	FDBAttackDefinition HeavyAttack;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0.01"))
 	double EvadeDuration = 0.80;
@@ -117,11 +160,16 @@ protected:
 	uint64 ActiveActionId = 0;
 
 	UPROPERTY(VisibleInstanceOnly, Transient, Category = "Combat")
-	FDBBufferedEvade BufferedEvade;
+	FDBBufferedAction BufferedAction;
 
 private:
 	bool CanProcessInput() const;
 	void TryStartEvade(double Now);
+	void TryStartAttack();
+	void SampleAttackWindow(float Position);
+	void AttackBlendingOut(UAnimMontage* Montage, bool bInterrupted, uint64 ActionId);
+	void AttackEnded(UAnimMontage* Montage, bool bInterrupted, uint64 ActionId);
+	void StopAttackMontage();
 	void UpdateEvadeMovement(float DeltaTime);
 	bool IsEvadeMontageActive() const;
 	void StopEvadeMovement(bool bStopHorizontalVelocity = true);
@@ -140,4 +188,8 @@ private:
 	bool bBlendingToSprint = false;
 	bool bBackwardEvade = false;
 	bool bAirEvadeUsed = false;
+	UPROPERTY(Transient)
+	FDBAttackDefinition ActiveAttack;
+	int32 AttackMontageInstanceId = INDEX_NONE;
+	float PreviousAttackPosition = 0.0f;
 };

@@ -10,6 +10,7 @@ class UDBCombatComponent;
 class UInputAction;
 class UInputMappingContext;
 class USpringArmComponent;
+class UStaticMeshComponent;
 struct FInputActionValue;
 
 /** Input/movement policy lives in C++; the Blueprint child supplies assets. */
@@ -27,6 +28,7 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 	virtual bool CanJumpWhileFalling() const override;
+	virtual bool CanJumpInternal_Implementation() const override;
 	virtual void OnJumped_Implementation() override;
 	virtual void Landed(const FHitResult& Hit) override;
 
@@ -38,6 +40,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
 	TObjectPtr<UDBCombatComponent> CombatComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+	TObjectPtr<UStaticMeshComponent> WeaponMesh;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Animation")
 	TObjectPtr<UAnimMontage> DoubleJumpMontage;
@@ -69,6 +74,12 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> EvadeAction;
 
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> LightAttackAction;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> HeavyAttackAction;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Movement", meta = (ClampMin = "0"))
 	float RunSpeed = 600.0f;
 
@@ -95,6 +106,8 @@ protected:
 
 private:
 	void Move(const FInputActionValue& Value);
+	void LightAttack();
+	void HeavyAttack();
 	void MoveGamepad(const FInputActionValue& Value);
 	void StopGamepadMovement();
 	void AddCameraRelativeMovement(const FVector2D& Axes);
