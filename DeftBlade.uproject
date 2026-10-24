@@ -37,6 +37,13 @@
       ]
     },
     {
+      "Name": "NarshaMCP",
+      "Enabled": true,
+      "TargetAllowList": [
+        "Editor"
+      ]
+    },
+    {
       "Name": "AndroidFileServer",
       "Enabled": false
     }

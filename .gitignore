@@ -51,7 +51,6 @@
 **/.idea/
 **/.vscode/
 **/.codex/
-**/.claude/
 **/.aws/
 **/.ssh/
 **/.env*
@@ -80,3 +79,4 @@
 # Markdown stays local. Only the empty root README is tracked for now.
 *.[mM][dD]
 !/README.md
+.claude/settings.local.json

@@ -5,11 +5,13 @@
 #include "Components/CapsuleComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "EnhancedPlayerInput.h"
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "InputActionValue.h"
+#include "InputAction.h"
 #include "InputMappingContext.h"
 #include "TimerManager.h"
 
@@ -17,6 +19,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogDBPlayer, Log, All);
 
 ADBPlayerCharacter::ADBPlayerCharacter()
 {
+	JumpMaxCount = 2;
+
 	GetCapsuleComponent()->InitCapsuleSize(42.0f, 96.0f);
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = false;
@@ -53,6 +57,52 @@ void ADBPlayerCharacter::BeginPlay()
 	ResetMovementInput();
 }
 
+bool ADBPlayerCharacter::CanJumpWhileFalling() const
+{
+	// Walking off a ledge does not consume the first jump.
+	return true;
+}
+
+void ADBPlayerCharacter::OnJumped_Implementation()
+{
+	Super::OnJumped_Implementation();
+	StopSprinting();
+	// ACharacter has already accepted the jump and incremented its count.
+	if (JumpCurrentCount != 2)
+	{
+		return;
+	}
+
+	const APlayerController* PlayerController = Cast<APlayerController>(Controller);
+	const UEnhancedPlayerInput* Input = PlayerController ? Cast<UEnhancedPlayerInput>(PlayerController->PlayerInput) : nullptr;
+	// Read current actions: velocity can persist after release, and evade consumes movement intent before CMC.
+	const bool bHasDirectionInput = Input && ((MoveAction && Input->GetActionValue(MoveAction).IsNonZero())
+		|| (GamepadMoveAction && Input->GetActionValue(GamepadMoveAction).IsNonZero()));
+	UAnimMontage* Montage = bHasDirectionInput ? DoubleJumpMontage.Get() : BackwardDoubleJumpMontage.Get();
+	if (Montage)
+	{
+		PlayAnimMontage(Montage);
+	}
+}
+
+void ADBPlayerCharacter::Landed(const FHitResult& Hit)
+{
+	Super::Landed(Hit);
+	CombatComponent->ResetAirEvade();
+	StopJumpMontages();
+}
+
+void ADBPlayerCharacter::StopJumpMontages()
+{
+	for (UAnimMontage* Montage : {DoubleJumpMontage.Get(), BackwardDoubleJumpMontage.Get()})
+	{
+		if (Montage)
+		{
+			StopAnimMontage(Montage);
+		}
+	}
+}
+
 void ADBPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
@@ -70,6 +120,8 @@ void ADBPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	}
 
 	Input->BindAction(MoveAction, ETriggerEvent::Triggered, this, &ThisClass::Move);
+	Input->BindAction(MoveAction, ETriggerEvent::Completed, this, &ThisClass::StopSprinting);
+	Input->BindAction(MoveAction, ETriggerEvent::Canceled, this, &ThisClass::StopSprinting);
 	Input->BindAction(GamepadMoveAction, ETriggerEvent::Triggered, this, &ThisClass::MoveGamepad);
 	Input->BindAction(GamepadMoveAction, ETriggerEvent::Completed, this, &ThisClass::StopGamepadMovement);
 	Input->BindAction(GamepadMoveAction, ETriggerEvent::Canceled, this, &ThisClass::StopGamepadMovement);
@@ -82,6 +134,8 @@ void ADBPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	Input->BindAction(WalkAction, ETriggerEvent::Completed, this, &ThisClass::StopWalking);
 	Input->BindAction(WalkAction, ETriggerEvent::Canceled, this, &ThisClass::StopWalking);
 	Input->BindAction(EvadeAction, ETriggerEvent::Started, CombatComponent.Get(), &UDBCombatComponent::RequestEvade);
+	Input->BindAction(EvadeAction, ETriggerEvent::Completed, this, &ThisClass::StopSprinting);
+	Input->BindAction(EvadeAction, ETriggerEvent::Canceled, this, &ThisClass::StopSprinting);
 }
 
 void ADBPlayerCharacter::Move(const FInputActionValue& Value)
@@ -92,8 +146,8 @@ void ADBPlayerCharacter::Move(const FInputActionValue& Value)
 	}
 
 	bUsingGamepadMovement = false;
-	GetCharacterMovement()->MaxWalkSpeed = bWalkInputHeld ? WalkSpeed : RunSpeed;
 	AddCameraRelativeMovement(Value.Get<FVector2D>());
+	UpdateSprint();
 }
 
 void ADBPlayerCharacter::MoveGamepad(const FInputActionValue& Value)
@@ -112,8 +166,8 @@ void ADBPlayerCharacter::MoveGamepad(const FInputActionValue& Value)
 	const float Threshold = bGamepadRunSelected ? FMath::Min(GamepadWalkThreshold, GamepadRunThreshold) : GamepadRunThreshold;
 	bGamepadRunSelected = Axes.Size() >= Threshold;
 	bUsingGamepadMovement = true;
-	GetCharacterMovement()->MaxWalkSpeed = bGamepadRunSelected ? RunSpeed : WalkSpeed;
 	AddCameraRelativeMovement(Axes.GetSafeNormal());
+	UpdateSprint();
 }
 
 void ADBPlayerCharacter::StopGamepadMovement()
@@ -122,7 +176,7 @@ void ADBPlayerCharacter::StopGamepadMovement()
 	if (bUsingGamepadMovement)
 	{
 		bUsingGamepadMovement = false;
-		GetCharacterMovement()->MaxWalkSpeed = bWalkInputHeld ? WalkSpeed : RunSpeed;
+		StopSprinting();
 	}
 }
 
@@ -153,7 +207,7 @@ void ADBPlayerCharacter::StartWalking()
 	bWalkInputHeld = true;
 	if (!bUsingGamepadMovement)
 	{
-		GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
+		StopSprinting();
 	}
 }
 
@@ -162,14 +216,42 @@ void ADBPlayerCharacter::StopWalking()
 	bWalkInputHeld = false;
 	if (!bUsingGamepadMovement)
 	{
-		GetCharacterMovement()->MaxWalkSpeed = RunSpeed;
+		RefreshMovementSpeed();
 	}
+}
+
+void ADBPlayerCharacter::UpdateSprint()
+{
+	const APlayerController* PlayerController = Cast<APlayerController>(Controller);
+	const UEnhancedPlayerInput* Input = PlayerController ? Cast<UEnhancedPlayerInput>(PlayerController->PlayerInput) : nullptr;
+	const FInputActionInstance* EvadeInput = Input && EvadeAction ? Input->FindActionInstanceData(EvadeAction) : nullptr;
+	// A fresh press belongs to evade/chaining; sprint requires a continued hold.
+	const bool bHeld = !(bWalkInputHeld && !bUsingGamepadMovement)
+		&& EvadeInput && EvadeInput->GetValue().IsNonZero() && EvadeInput->GetTriggeredTime() >= 0.15f;
+	CombatComponent->SetEvadeHeld(bHeld, SprintSpeed);
+	const bool bCanSprint = bHeld && GetCharacterMovement()->IsMovingOnGround();
+	bSprinting = bCanSprint && (bSprinting || CombatComponent->TryTransitionToSprint());
+	RefreshMovementSpeed();
+}
+
+void ADBPlayerCharacter::StopSprinting()
+{
+	CombatComponent->SetEvadeHeld(false, SprintSpeed);
+	bSprinting = false;
+	RefreshMovementSpeed();
+}
+
+void ADBPlayerCharacter::RefreshMovementSpeed()
+{
+	const bool bWalk = bUsingGamepadMovement ? !bGamepadRunSelected : bWalkInputHeld;
+	GetCharacterMovement()->MaxWalkSpeed = bSprinting ? SprintSpeed : (bWalk ? WalkSpeed : RunSpeed);
 }
 
 void ADBPlayerCharacter::ResetMovementInput()
 {
 	bGamepadRunSelected = false;
 	bUsingGamepadMovement = false;
+	StopSprinting();
 	StopWalking();
 }
 
@@ -237,6 +319,7 @@ void ADBPlayerCharacter::UnPossessed()
 {
 	CombatComponent->ResetCombat();
 	CombatComponent->RemoveTickPrerequisiteActor(Controller);
+	StopJumpMontages();
 	StopJumping();
 	ResetMovementInput();
 	ReleaseMappingContext();

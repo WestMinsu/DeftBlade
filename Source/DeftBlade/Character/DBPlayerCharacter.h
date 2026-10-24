@@ -4,6 +4,7 @@
 #include "GameFramework/Character.h"
 #include "DBPlayerCharacter.generated.h"
 
+class UAnimMontage;
 class UCameraComponent;
 class UDBCombatComponent;
 class UInputAction;
@@ -25,6 +26,9 @@ public:
 protected:
 	virtual void BeginPlay() override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
+	virtual bool CanJumpWhileFalling() const override;
+	virtual void OnJumped_Implementation() override;
+	virtual void Landed(const FHitResult& Hit) override;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
 	TObjectPtr<USpringArmComponent> CameraBoom;
@@ -34,6 +38,12 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
 	TObjectPtr<UDBCombatComponent> CombatComponent;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Animation")
+	TObjectPtr<UAnimMontage> DoubleJumpMontage;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Animation")
+	TObjectPtr<UAnimMontage> BackwardDoubleJumpMontage;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputMappingContext> GameplayMappingContext;
@@ -65,6 +75,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Movement", meta = (ClampMin = "0"))
 	float WalkSpeed = 200.0f;
 
+	UPROPERTY(EditDefaultsOnly, Category = "Movement", meta = (ClampMin = "0"))
+	float SprintSpeed = 900.0f;
+
 	/** Stick magnitude after the IMC deadzone; separate thresholds prevent gait flicker. */
 	UPROPERTY(EditDefaultsOnly, Category = "Movement", meta = (ClampMin = "0", ClampMax = "1"))
 	float GamepadRunThreshold = 0.70f;
@@ -89,7 +102,11 @@ private:
 	void LookGamepad(const FInputActionValue& Value);
 	void StartWalking();
 	void StopWalking();
+	void UpdateSprint();
+	void StopSprinting();
+	void RefreshMovementSpeed();
 	void ResetMovementInput();
+	void StopJumpMontages();
 	void InitializeCameraRotation();
 	void AddMappingContext();
 	void ReleaseMappingContext();
@@ -98,4 +115,5 @@ private:
 	bool bWalkInputHeld = false;
 	bool bGamepadRunSelected = false;
 	bool bUsingGamepadMovement = false;
+	bool bSprinting = false;
 };
