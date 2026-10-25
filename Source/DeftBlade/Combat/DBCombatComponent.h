@@ -17,6 +17,22 @@ enum class EDBActionState : uint8
 	HeavyAttack
 };
 
+/** A jump is a request; CMC owns its movement, so it is not a combat state. */
+UENUM()
+enum class EDBActionInput : uint8
+{
+	None, Evade, LightAttack, HeavyAttack, Jump
+};
+
+UENUM(BlueprintType)
+enum class EDBAttackId : uint8
+{
+	None,
+	Light1, Light2, Light3, Light4,
+	Heavy1, Heavy2, Heavy3, Heavy4,
+	Light1Heavy, Light2Heavy
+};
+
 /** One deliberate press. Id == 0 means the slot is empty. */
 USTRUCT()
 struct FDBBufferedAction
@@ -30,7 +46,7 @@ struct FDBBufferedAction
 	double ReceivedAt = 0.0;
 
 	UPROPERTY(VisibleAnywhere)
-	EDBActionState Action = EDBActionState::None;
+	EDBActionInput Input = EDBActionInput::None;
 
 	bool IsExpired(double Now, double Lifetime) const
 	{
@@ -62,6 +78,15 @@ struct FDBAttackDefinition
 	GENERATED_BODY()
 
 	UPROPERTY(EditAnywhere)
+	EDBAttackId Id = EDBAttackId::None;
+
+	UPROPERTY(EditAnywhere)
+	EDBAttackId NextLight = EDBAttackId::None;
+
+	UPROPERTY(EditAnywhere)
+	EDBAttackId NextHeavy = EDBAttackId::None;
+
+	UPROPERTY(EditAnywhere)
 	TObjectPtr<UAnimMontage> Montage;
 
 	UPROPERTY(EditAnywhere, meta = (ClampMin = "0.01"))
@@ -74,6 +99,16 @@ struct FDBAttackDefinition
 	/** Earliest next attack; always after this motion's last hit window. */
 	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"))
 	float ComboStart = 0.65f;
+
+	/** Dodge may interrupt startup; jump/movement wait until the final hit ends. */
+	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"))
+	float EvadeCancelStart = 0.10f;
+
+	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"))
+	float JumpCancelStart = 0.55f;
+
+	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"))
+	float MoveCancelStart = 0.60f;
 
 	UPROPERTY(EditAnywhere, meta = (ClampMin = "0.01"))
 	float Damage = 25.0f;
@@ -94,6 +129,8 @@ public:
 
 	void RequestEvade();
 	void RequestAttack(bool bHeavy);
+	void RequestJump();
+	bool CanJumpFromAction() const;
 	void SetWeaponMesh(UStaticMeshComponent* InWeapon) { WeaponMesh = InWeapon; }
 	void SetEvadeHeld(bool bHeld, float SprintSpeed) { bEvadeHeld = bHeld; HeldGlideSpeed = SprintSpeed; }
 	bool TryTransitionToSprint();
@@ -106,7 +143,7 @@ public:
 
 	EDBActionState GetActionState() const { return ActionState; }
 	uint64 GetActiveActionId() const { return ActiveActionId; }
-	int32 GetComboIndex() const { return ComboIndex; }
+	EDBAttackId GetAttackId() const { return IsAttacking() ? ActiveAttack.Id : EDBAttackId::None; }
 	const FDBBufferedAction& GetBufferedAction() const { return BufferedAction; }
 	bool IsAttacking() const { return ActionState == EDBActionState::LightAttack || ActionState == EDBActionState::HeavyAttack; }
 	bool IsAttackWindowOpen() const;
@@ -123,10 +160,14 @@ protected:
 	double InputBufferLifetime = 0.18;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Attack")
-	TArray<FDBAttackDefinition> LightCombo;
+	TArray<FDBAttackDefinition> Attacks;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Combat|Attack")
-	TArray<FDBAttackDefinition> HeavyCombo;
+	/** Attack exits the evade after its fixed i-frame interval. */
+	UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0"))
+	double EvadeAttackCancelStart = 0.26;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0"))
+	double EvadeJumpCancelStart = 0.10;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Trace", meta = (ClampMin = "0.5"))
 	float BladeTraceRadius = 3.0f;
@@ -188,6 +229,10 @@ protected:
 
 private:
 	bool CanProcessInput() const;
+	void QueueInput(EDBActionInput Input);
+	EDBAttackId NextAttack(EDBActionInput Input) const;
+	const FDBAttackDefinition* FindAttack(EDBAttackId Id) const;
+	void TryStartJump();
 	void TryStartEvade(double Now);
 	void TryStartAttack();
 	void SampleAttackWindow(float Position);
@@ -220,8 +265,6 @@ private:
 	bool bAirEvadeUsed = false;
 	UPROPERTY(Transient)
 	FDBAttackDefinition ActiveAttack;
-	UPROPERTY(VisibleInstanceOnly, Transient, Category = "Combat|Attack")
-	int32 ComboIndex = INDEX_NONE;
 	int32 ActiveHitWindow = INDEX_NONE;
 	int32 AttackMontageInstanceId = INDEX_NONE;
 	float PreviousAttackPosition = 0.0f;

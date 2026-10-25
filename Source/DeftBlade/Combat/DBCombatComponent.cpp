@@ -26,16 +26,32 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogDBCombat, Log, All);
 
+namespace
+{
+bool IsAttackInput(EDBActionInput Input)
+{
+	return Input == EDBActionInput::LightAttack || Input == EDBActionInput::HeavyAttack;
+}
+int32 InputPriority(EDBActionInput Input)
+{
+	return Input == EDBActionInput::Evade ? 3 : Input == EDBActionInput::Jump ? 2 : 1;
+}
+}
+
 bool FDBAttackDefinition::IsValid() const
 {
-	if (!Montage || !FMath::IsFinite(PlayRate) || PlayRate <= 0.0f
+	if (Id == EDBAttackId::None || !Montage || !FMath::IsFinite(PlayRate) || PlayRate <= 0.0f
 		|| !FMath::IsFinite(Damage) || Damage <= 0.0f || HitWindows.IsEmpty()
-		|| !FMath::IsFinite(ComboStart) || ComboStart >= Montage->GetPlayLength()) { return false; }
+		|| !FMath::IsFinite(ComboStart) || ComboStart >= Montage->GetPlayLength()
+		|| !FMath::IsFinite(EvadeCancelStart) || EvadeCancelStart < 0.0f || EvadeCancelStart >= Montage->GetPlayLength()
+		|| !FMath::IsFinite(JumpCancelStart) || JumpCancelStart >= Montage->GetPlayLength()
+		|| !FMath::IsFinite(MoveCancelStart) || MoveCancelStart >= Montage->GetPlayLength()) { return false; }
 	float PreviousEnd = 0.0f;
 	for (const FDBAttackWindow& Window : HitWindows)
 	{
 		if (!FMath::IsFinite(Window.Start) || !FMath::IsFinite(Window.End)
-			|| Window.Start < PreviousEnd || Window.End <= Window.Start || Window.End > ComboStart) { return false; }
+			|| Window.Start < PreviousEnd || Window.End <= Window.Start || Window.End > ComboStart
+			|| Window.End > JumpCancelStart || Window.End > MoveCancelStart) { return false; }
 		PreviousEnd = Window.End;
 	}
 	return true;
@@ -82,36 +98,74 @@ bool UDBCombatComponent::CanProcessInput() const
 
 void UDBCombatComponent::RequestEvade()
 {
-	if (!CanProcessInput())
-	{
-		ResetCombat();
-		return;
-	}
-	if (CastChecked<ACharacter>(GetOwner())->GetCharacterMovement()->IsFalling() && (bAirEvadeUsed || EvadeMotionId != 0))
-	{
-		// A rejected air press must not replay automatically on landing.
-		bAirEvadeUsed = true;
-		BufferedAction = {};
-		return;
-	}
-	BufferedAction = {++NextRequestId, GetWorld()->GetTimeSeconds(), EDBActionState::Evade};
-	UE_LOG(LogDBCombat, Verbose, TEXT("%s queued #%llu at %.3f"), *GetOwner()->GetName(),
-		BufferedAction.Id, BufferedAction.ReceivedAt);
+	QueueInput(EDBActionInput::Evade);
 }
 
 void UDBCombatComponent::RequestAttack(bool bHeavy)
 {
+	QueueInput(bHeavy ? EDBActionInput::HeavyAttack : EDBActionInput::LightAttack);
+}
+
+void UDBCombatComponent::RequestJump()
+{
+	QueueInput(EDBActionInput::Jump);
+}
+
+void UDBCombatComponent::QueueInput(EDBActionInput Input)
+{
 	if (!CanProcessInput()) { ResetCombat(); return; }
-	// Air attacks join later. A rejected press must never replay on landing.
-	if (!CastChecked<ACharacter>(GetOwner())->GetCharacterMovement()->IsMovingOnGround()) { return; }
+	const ACharacter* Character = CastChecked<ACharacter>(GetOwner());
+	if (IsAttackInput(Input) && (!Character->GetCharacterMovement()->IsMovingOnGround()
+		|| NextAttack(Input) == EDBAttackId::None)) { return; }
+	if (Input == EDBActionInput::Jump && (Character->JumpCurrentCount >= Character->JumpMaxCount
+		|| !Character->GetCharacterMovement()->CanAttemptJump())) { return; }
+	if (Input == EDBActionInput::Evade && Character->GetCharacterMovement()->IsFalling() && (bAirEvadeUsed || EvadeMotionId != 0))
+	{
+		// A rejected air press must not replay automatically on landing.
+		bAirEvadeUsed = true;
+		return;
+	}
 	const double Now = GetWorld()->GetTimeSeconds();
-	if (BufferedAction.Action == EDBActionState::Evade && BufferedAction.Id != 0
-		&& (ActionState == EDBActionState::Evade || !BufferedAction.IsExpired(Now, InputBufferLifetime))) { return; }
-	const EDBActionState Requested = bHeavy ? EDBActionState::HeavyAttack : EDBActionState::LightAttack;
-	const TArray<FDBAttackDefinition>& Combo = bHeavy ? HeavyCombo : LightCombo;
-	// The finisher never wraps back to hit 1 from a press made during that finisher.
-	if (IsAttacking() && Requested == ActionState && !Combo.IsValidIndex(ComboIndex + 1)) { return; }
-	BufferedAction = {++NextRequestId, Now, Requested};
+	if (BufferedAction.Id != 0 && (ActionState != EDBActionState::None || !BufferedAction.IsExpired(Now, InputBufferLifetime))
+		&& InputPriority(BufferedAction.Input) > InputPriority(Input)) { return; }
+	BufferedAction = {++NextRequestId, Now, Input};
+}
+
+EDBAttackId UDBCombatComponent::NextAttack(EDBActionInput Input) const
+{
+	if (!IsAttackInput(Input)) { return EDBAttackId::None; }
+	if (IsAttacking()) { return Input == EDBActionInput::HeavyAttack ? ActiveAttack.NextHeavy : ActiveAttack.NextLight; }
+	return Input == EDBActionInput::HeavyAttack ? EDBAttackId::Heavy1 : EDBAttackId::Light1;
+}
+
+const FDBAttackDefinition* UDBCombatComponent::FindAttack(EDBAttackId Id) const
+{
+	const FDBAttackDefinition* Found = nullptr;
+	for (const FDBAttackDefinition& Definition : Attacks)
+	{
+		if (Definition.Id != Id) { continue; }
+		if (Found) { return nullptr; } // Ambiguous authoring must not select an arbitrary move.
+		Found = &Definition;
+	}
+	return Found;
+}
+
+bool UDBCombatComponent::CanJumpFromAction() const
+{
+	if (IsAttacking()) { return PreviousAttackPosition >= ActiveAttack.JumpCancelStart; }
+	return ActionState != EDBActionState::Evade || GetWorld()->GetTimeSeconds() >= ActionStartedAt + EvadeJumpCancelStart;
+}
+
+void UDBCombatComponent::TryStartJump()
+{
+	ACharacter* Character = CastChecked<ACharacter>(GetOwner());
+	if (!Character->CanJump()) { BufferedAction = {}; return; }
+	// Stop the ground evade before CMC enters Falling, preserving the separate air-evade budget.
+	StopEvadeMovement(false);
+	FinishAction(ActiveActionId);
+	StopEvadeMontage();
+	BufferedAction = {};
+	Character->Jump();
 }
 
 bool UDBCombatComponent::TryTransitionToSprint()
@@ -160,20 +214,23 @@ void UDBCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		// A ground evade carried off a ledge already occupies this airborne evade.
 		bAirEvadeUsed = true;
 	}
-	const bool bAttackBuffered = BufferedAction.Action == EDBActionState::LightAttack || BufferedAction.Action == EDBActionState::HeavyAttack;
 	// One deliberate follow-up survives the current action, rather than expiring during its wind-up.
-	if (!(IsAttacking() && bAttackBuffered)
-		&& !(ActionState == EDBActionState::Evade && BufferedAction.Action == EDBActionState::Evade)
-		&& BufferedAction.IsExpired(Now, InputBufferLifetime))
+	if (ActionState == EDBActionState::None && BufferedAction.IsExpired(Now, InputBufferLifetime))
 	{
 		UE_LOG(LogDBCombat, Verbose, TEXT("%s expired #%llu at %.3f"), *GetOwner()->GetName(), BufferedAction.Id, Now);
 		BufferedAction = {};
 	}
-	const bool bCanChain = ActionState == EDBActionState::Evade && BufferedAction.Action == EDBActionState::Evade && Now >= ChainStartsAt;
-	if (BufferedAction.Id != 0 && (bCanChain || (ActionState == EDBActionState::None && !IsEvadeMontageActive())))
+	const bool bEvadeExit = ActionState == EDBActionState::Evade &&
+		((BufferedAction.Input == EDBActionInput::Evade && Now >= ChainStartsAt)
+		|| (IsAttackInput(BufferedAction.Input) && Now >= ActionStartedAt + FMath::Max(EvadeAttackCancelStart, InvulnerabilityEnd))
+		|| (BufferedAction.Input == EDBActionInput::Jump && CanJumpFromAction()));
+	const bool bAttackExit = IsAttacking() &&
+		((BufferedAction.Input == EDBActionInput::Evade && PreviousAttackPosition >= ActiveAttack.EvadeCancelStart)
+		|| (BufferedAction.Input == EDBActionInput::Jump && CanJumpFromAction()));
+	if (BufferedAction.Id != 0 && (bEvadeExit || bAttackExit || ActionState == EDBActionState::None))
 	{
-		// Start at the authored recovery gate, keeping its remaining momentum.
-		if (BufferedAction.Action == EDBActionState::Evade) { TryStartEvade(Now); }
+		if (BufferedAction.Input == EDBActionInput::Evade) { TryStartEvade(Now); }
+		else if (BufferedAction.Input == EDBActionInput::Jump) { TryStartJump(); }
 		else { TryStartAttack(); }
 	}
 	if (IsAttacking())
@@ -182,6 +239,12 @@ void UDBCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		UAnimInstance* Anim = Character->GetMesh()->GetAnimInstance();
 		FAnimMontageInstance* Instance = Anim ? Anim->GetMontageInstanceForID(AttackMontageInstanceId) : nullptr;
 		if (!Character->GetCharacterMovement()->IsMovingOnGround() || (!Instance && !bAttackEndedPending)) { FinishAction(ActiveActionId); }
+		else if (BufferedAction.Id == 0 && PreviousAttackPosition >= ActiveAttack.MoveCancelStart
+			&& !Character->GetPendingMovementInputVector().IsNearlyZero())
+		{
+			// Keep this frame's movement intent for CMC instead of consuming it during recovery.
+			FinishAction(ActiveActionId);
+		}
 		else
 		{
 			// Root-motion animation owns translation and facing until recovery ends.
@@ -324,11 +387,9 @@ void UDBCombatComponent::TryStartEvade(double Now)
 	{
 		return;
 	}
-	if (EvadeMotionId != 0)
-	{
-		// The previous action's motion is ours; preserve momentum while the new source takes over.
-		Movement->RemoveRootMotionSourceByID(EvadeMotionId);
-	}
+	// New motion is valid. Finish the previous action before publishing this source's ID.
+	StopEvadeMovement(false);
+	FinishAction(ActiveActionId, false);
 	EvadeMotionId = NewMotionId;
 	bBackwardEvade = bStartBackward;
 	EvadeDirection = Direction;
@@ -384,7 +445,6 @@ bool UDBCombatComponent::FinishAction(uint64 ExpectedActionId, bool bInterrupted
 		BufferedAction = {};
 	}
 	ActionState = EDBActionState::None;
-	ComboIndex = INDEX_NONE;
 	ActiveActionId = 0;
 	ActionStartedAt = 0.0;
 	MovementEndsAt = 0.0;
@@ -397,29 +457,29 @@ bool UDBCombatComponent::FinishAction(uint64 ExpectedActionId, bool bInterrupted
 void UDBCombatComponent::TryStartAttack()
 {
 	ACharacter* Character = CastChecked<ACharacter>(GetOwner());
-	const TArray<FDBAttackDefinition>& Combo = BufferedAction.Action == EDBActionState::HeavyAttack ? HeavyCombo : LightCombo;
-	const bool bContinuing = IsAttacking();
-	// Switching buttons begins the selected moveset at hit 1; no arbitrary combo graph.
-	const int32 NextIndex = bContinuing && ActionState == BufferedAction.Action ? ComboIndex + 1 : 0;
+	const FDBAttackDefinition* Definition = FindAttack(NextAttack(BufferedAction.Input));
+	const bool bContinuing = ActionState != EDBActionState::None;
 	UAnimInstance* Anim = Character->GetMesh()->GetAnimInstance();
-	if (!Character->GetCharacterMovement()->IsMovingOnGround() || !Anim || !Combo.IsValidIndex(NextIndex)
-		|| !Combo[NextIndex].IsValid() || !ConfigureBlade())
+	if (!Character->GetCharacterMovement()->IsMovingOnGround() || !Anim || !Definition
+		|| !Definition->IsValid() || !ConfigureBlade())
 	{
 		BufferedAction = {};
 		return;
 	}
-	const FDBAttackDefinition Definition = Combo[NextIndex];
-	if (bContinuing) { StopAttackMontage(); }
-	if (Anim->Montage_Play(Definition.Montage, Definition.PlayRate) <= 0.0f)
+	if (bContinuing)
+	{
+		StopEvadeMovement(false);
+		FinishAction(ActiveActionId, false);
+	}
+	if (Anim->Montage_Play(Definition->Montage, Definition->PlayRate) <= 0.0f)
 	{
 		BufferedAction = {};
 		if (bContinuing) { FinishAction(ActiveActionId); }
 		return;
 	}
-	FAnimMontageInstance* Instance = Anim->GetActiveInstanceForMontage(Definition.Montage);
+	FAnimMontageInstance* Instance = Anim->GetActiveInstanceForMontage(Definition->Montage);
 	check(Instance);
-	ActiveAttack = Definition;
-	ComboIndex = NextIndex;
+	ActiveAttack = *Definition;
 	ActiveHitWindow = INDEX_NONE;
 	AttackMontageInstanceId = Instance->GetInstanceID();
 	PreviousAttackPosition = 0.0f;
@@ -428,7 +488,7 @@ void UDBCombatComponent::TryStartAttack()
 	HitActors.Reset();
 	bAttackEndedPending = false;
 	ActiveActionId = BufferedAction.Id;
-	ActionState = BufferedAction.Action;
+	ActionState = BufferedAction.Input == EDBActionInput::HeavyAttack ? EDBActionState::HeavyAttack : EDBActionState::LightAttack;
 	BufferedAction = {};
 	Character->StopJumping();
 	if (!bContinuing) { Character->GetCharacterMovement()->StopMovementImmediately(); }
@@ -570,7 +630,7 @@ void UDBCombatComponent::BonesFinalized()
 	PreviousMeshTransform = CurrentMesh;
 	PreviousWeaponTransform = CurrentWeapon;
 	// Flush this frame's contacts before changing the montage or resetting its per-swing hit set.
-	if (BufferedAction.Id != 0 && BufferedAction.Action != EDBActionState::Evade && Position >= ActiveAttack.ComboStart)
+	if (BufferedAction.Id != 0 && IsAttackInput(BufferedAction.Input) && Position >= ActiveAttack.ComboStart)
 	{
 		TryStartAttack();
 		if (ActionId != ActiveActionId) { return; }

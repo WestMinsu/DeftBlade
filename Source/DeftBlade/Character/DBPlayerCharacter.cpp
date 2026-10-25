@@ -94,7 +94,7 @@ bool ADBPlayerCharacter::CanJumpWhileFalling() const
 
 bool ADBPlayerCharacter::CanJumpInternal_Implementation() const
 {
-	return !HealthComponent->IsDead() && !CombatComponent->IsAttacking() && Super::CanJumpInternal_Implementation();
+	return !HealthComponent->IsDead() && CombatComponent->CanJumpFromAction() && Super::CanJumpInternal_Implementation();
 }
 
 void ADBPlayerCharacter::OnJumped_Implementation()
@@ -162,7 +162,7 @@ void ADBPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	Input->BindAction(GamepadMoveAction, ETriggerEvent::Canceled, this, &ThisClass::StopGamepadMovement);
 	Input->BindAction(MouseLookAction, ETriggerEvent::Triggered, this, &ThisClass::LookMouse);
 	Input->BindAction(GamepadLookAction, ETriggerEvent::Triggered, this, &ThisClass::LookGamepad);
-	Input->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
+	Input->BindAction(JumpAction, ETriggerEvent::Started, CombatComponent.Get(), &UDBCombatComponent::RequestJump);
 	Input->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
 	Input->BindAction(JumpAction, ETriggerEvent::Canceled, this, &ACharacter::StopJumping);
 	Input->BindAction(WalkAction, ETriggerEvent::Started, this, &ThisClass::StartWalking);
