@@ -40,6 +40,23 @@ struct FDBBufferedAction
 
 /** Times are montage seconds, independent of playback rate. */
 USTRUCT(BlueprintType)
+struct FDBAttackWindow
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"))
+	float Start = 0.15f;
+
+	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"))
+	float End = 0.35f;
+
+	bool Overlaps(float Previous, float Current) const
+	{
+		return Current > Previous && Previous < End && Current > Start;
+	}
+};
+
+USTRUCT(BlueprintType)
 struct FDBAttackDefinition
 {
 	GENERATED_BODY()
@@ -50,20 +67,18 @@ struct FDBAttackDefinition
 	UPROPERTY(EditAnywhere, meta = (ClampMin = "0.01"))
 	float PlayRate = 1.0f;
 
-	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"))
-	float ActiveStart = 0.15f;
+	/** Separate swings in one motion may each damage the same target once. */
+	UPROPERTY(EditAnywhere)
+	TArray<FDBAttackWindow> HitWindows = { FDBAttackWindow() };
 
+	/** Earliest next attack; always after this motion's last hit window. */
 	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"))
-	float ActiveEnd = 0.35f;
+	float ComboStart = 0.65f;
 
 	UPROPERTY(EditAnywhere, meta = (ClampMin = "0.01"))
 	float Damage = 25.0f;
 
 	bool IsValid() const;
-	bool OverlapsActiveWindow(float Previous, float Current) const
-	{
-		return Current > Previous && Previous < ActiveEnd && Current > ActiveStart;
-	}
 };
 
 DECLARE_MULTICAST_DELEGATE_TwoParams(FDBAttackWindowTraversed, float, float);
@@ -91,6 +106,7 @@ public:
 
 	EDBActionState GetActionState() const { return ActionState; }
 	uint64 GetActiveActionId() const { return ActiveActionId; }
+	int32 GetComboIndex() const { return ComboIndex; }
 	const FDBBufferedAction& GetBufferedAction() const { return BufferedAction; }
 	bool IsAttacking() const { return ActionState == EDBActionState::LightAttack || ActionState == EDBActionState::HeavyAttack; }
 	bool IsAttackWindowOpen() const;
@@ -102,15 +118,15 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
-	/** Idle expiry; an active evade retains one follow-up until it can chain. */
+	/** Idle expiry; active attacks/evades retain one compatible follow-up. */
 	UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0.01"))
 	double InputBufferLifetime = 0.18;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Attack")
-	FDBAttackDefinition LightAttack;
+	TArray<FDBAttackDefinition> LightCombo;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Attack")
-	FDBAttackDefinition HeavyAttack;
+	TArray<FDBAttackDefinition> HeavyCombo;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Trace", meta = (ClampMin = "0.5"))
 	float BladeTraceRadius = 3.0f;
@@ -204,6 +220,9 @@ private:
 	bool bAirEvadeUsed = false;
 	UPROPERTY(Transient)
 	FDBAttackDefinition ActiveAttack;
+	UPROPERTY(VisibleInstanceOnly, Transient, Category = "Combat|Attack")
+	int32 ComboIndex = INDEX_NONE;
+	int32 ActiveHitWindow = INDEX_NONE;
 	int32 AttackMontageInstanceId = INDEX_NONE;
 	float PreviousAttackPosition = 0.0f;
 	UPROPERTY(Transient)

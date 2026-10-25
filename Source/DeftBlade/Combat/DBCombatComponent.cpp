@@ -28,10 +28,17 @@ DEFINE_LOG_CATEGORY_STATIC(LogDBCombat, Log, All);
 
 bool FDBAttackDefinition::IsValid() const
 {
-	return Montage && FMath::IsFinite(PlayRate) && PlayRate > 0.0f
-		&& FMath::IsFinite(ActiveStart) && FMath::IsFinite(ActiveEnd)
-		&& ActiveStart >= 0.0f && ActiveEnd > ActiveStart && ActiveEnd < Montage->GetPlayLength()
-		&& FMath::IsFinite(Damage) && Damage > 0.0f;
+	if (!Montage || !FMath::IsFinite(PlayRate) || PlayRate <= 0.0f
+		|| !FMath::IsFinite(Damage) || Damage <= 0.0f || HitWindows.IsEmpty()
+		|| !FMath::IsFinite(ComboStart) || ComboStart >= Montage->GetPlayLength()) { return false; }
+	float PreviousEnd = 0.0f;
+	for (const FDBAttackWindow& Window : HitWindows)
+	{
+		if (!FMath::IsFinite(Window.Start) || !FMath::IsFinite(Window.End)
+			|| Window.Start < PreviousEnd || Window.End <= Window.Start || Window.End > ComboStart) { return false; }
+		PreviousEnd = Window.End;
+	}
+	return true;
 }
 
 UDBCombatComponent::UDBCombatComponent()
@@ -100,7 +107,11 @@ void UDBCombatComponent::RequestAttack(bool bHeavy)
 	const double Now = GetWorld()->GetTimeSeconds();
 	if (BufferedAction.Action == EDBActionState::Evade && BufferedAction.Id != 0
 		&& (ActionState == EDBActionState::Evade || !BufferedAction.IsExpired(Now, InputBufferLifetime))) { return; }
-	BufferedAction = {++NextRequestId, Now, bHeavy ? EDBActionState::HeavyAttack : EDBActionState::LightAttack};
+	const EDBActionState Requested = bHeavy ? EDBActionState::HeavyAttack : EDBActionState::LightAttack;
+	const TArray<FDBAttackDefinition>& Combo = bHeavy ? HeavyCombo : LightCombo;
+	// The finisher never wraps back to hit 1 from a press made during that finisher.
+	if (IsAttacking() && Requested == ActionState && !Combo.IsValidIndex(ComboIndex + 1)) { return; }
+	BufferedAction = {++NextRequestId, Now, Requested};
 }
 
 bool UDBCombatComponent::TryTransitionToSprint()
@@ -149,8 +160,10 @@ void UDBCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		// A ground evade carried off a ledge already occupies this airborne evade.
 		bAirEvadeUsed = true;
 	}
-	// Reserve one follow-up throughout this evade, including its animation recovery.
-	if (!(ActionState == EDBActionState::Evade && BufferedAction.Action == EDBActionState::Evade)
+	const bool bAttackBuffered = BufferedAction.Action == EDBActionState::LightAttack || BufferedAction.Action == EDBActionState::HeavyAttack;
+	// One deliberate follow-up survives the current action, rather than expiring during its wind-up.
+	if (!(IsAttacking() && bAttackBuffered)
+		&& !(ActionState == EDBActionState::Evade && BufferedAction.Action == EDBActionState::Evade)
 		&& BufferedAction.IsExpired(Now, InputBufferLifetime))
 	{
 		UE_LOG(LogDBCombat, Verbose, TEXT("%s expired #%llu at %.3f"), *GetOwner()->GetName(), BufferedAction.Id, Now);
@@ -371,6 +384,7 @@ bool UDBCombatComponent::FinishAction(uint64 ExpectedActionId, bool bInterrupted
 		BufferedAction = {};
 	}
 	ActionState = EDBActionState::None;
+	ComboIndex = INDEX_NONE;
 	ActiveActionId = 0;
 	ActionStartedAt = 0.0;
 	MovementEndsAt = 0.0;
@@ -383,21 +397,30 @@ bool UDBCombatComponent::FinishAction(uint64 ExpectedActionId, bool bInterrupted
 void UDBCombatComponent::TryStartAttack()
 {
 	ACharacter* Character = CastChecked<ACharacter>(GetOwner());
-	const FDBAttackDefinition& Definition = BufferedAction.Action == EDBActionState::HeavyAttack ? HeavyAttack : LightAttack;
+	const TArray<FDBAttackDefinition>& Combo = BufferedAction.Action == EDBActionState::HeavyAttack ? HeavyCombo : LightCombo;
+	const bool bContinuing = IsAttacking();
+	// Switching buttons begins the selected moveset at hit 1; no arbitrary combo graph.
+	const int32 NextIndex = bContinuing && ActionState == BufferedAction.Action ? ComboIndex + 1 : 0;
 	UAnimInstance* Anim = Character->GetMesh()->GetAnimInstance();
-	if (!Character->GetCharacterMovement()->IsMovingOnGround() || !Anim || !Definition.IsValid() || !ConfigureBlade())
+	if (!Character->GetCharacterMovement()->IsMovingOnGround() || !Anim || !Combo.IsValidIndex(NextIndex)
+		|| !Combo[NextIndex].IsValid() || !ConfigureBlade())
 	{
 		BufferedAction = {};
 		return;
 	}
+	const FDBAttackDefinition Definition = Combo[NextIndex];
+	if (bContinuing) { StopAttackMontage(); }
 	if (Anim->Montage_Play(Definition.Montage, Definition.PlayRate) <= 0.0f)
 	{
 		BufferedAction = {};
+		if (bContinuing) { FinishAction(ActiveActionId); }
 		return;
 	}
 	FAnimMontageInstance* Instance = Anim->GetActiveInstanceForMontage(Definition.Montage);
 	check(Instance);
 	ActiveAttack = Definition;
+	ComboIndex = NextIndex;
+	ActiveHitWindow = INDEX_NONE;
 	AttackMontageInstanceId = Instance->GetInstanceID();
 	PreviousAttackPosition = 0.0f;
 	PreviousMeshTransform = Character->GetMesh()->GetComponentTransform();
@@ -408,26 +431,34 @@ void UDBCombatComponent::TryStartAttack()
 	ActionState = BufferedAction.Action;
 	BufferedAction = {};
 	Character->StopJumping();
-	Character->GetCharacterMovement()->StopMovementImmediately();
+	if (!bContinuing) { Character->GetCharacterMovement()->StopMovementImmediately(); }
 	Instance->OnMontageBlendingOutStarted.BindUObject(this, &ThisClass::AttackBlendingOut, ActiveActionId);
 	Instance->OnMontageEnded.BindUObject(this, &ThisClass::AttackEnded, ActiveActionId);
 }
 
 void UDBCombatComponent::SampleAttackWindow(float Position)
 {
-	if (ActiveAttack.OverlapsActiveWindow(PreviousAttackPosition, Position))
+	const uint64 ActionId = ActiveActionId;
+	const float Previous = PreviousAttackPosition;
+	PreviousAttackPosition = Position;
+	for (const FDBAttackWindow& Window : ActiveAttack.HitWindows)
 	{
-		const float From = FMath::Max(PreviousAttackPosition, ActiveAttack.ActiveStart);
-		const float To = FMath::Min(Position, ActiveAttack.ActiveEnd);
-		PreviousAttackPosition = Position;
-		OnAttackWindowTraversed.Broadcast(From, To);
+		if (Window.Overlaps(Previous, Position))
+		{
+			OnAttackWindowTraversed.Broadcast(FMath::Max(Previous, Window.Start), FMath::Min(Position, Window.End));
+			if (ActionId != ActiveActionId) { return; }
+		}
 	}
-	else { PreviousAttackPosition = Position; }
 }
 
 bool UDBCombatComponent::IsAttackWindowOpen() const
 {
-	return IsAttacking() && PreviousAttackPosition >= ActiveAttack.ActiveStart && PreviousAttackPosition < ActiveAttack.ActiveEnd;
+	if (!IsAttacking()) { return false; }
+	for (const FDBAttackWindow& Window : ActiveAttack.HitWindows)
+	{
+		if (PreviousAttackPosition >= Window.Start && PreviousAttackPosition < Window.End) { return true; }
+	}
+	return false;
 }
 
 void UDBCombatComponent::AttackBlendingOut(UAnimMontage* Montage, bool bInterrupted, uint64 ActionId)
@@ -453,6 +484,7 @@ void UDBCombatComponent::StopAttackMontage()
 	ActiveAttack = {};
 	PreviousAttackPosition = 0.0f;
 	bAttackEndedPending = false;
+	ActiveHitWindow = INDEX_NONE;
 	HitActors.Reset();
 	if (Instance)
 	{
@@ -537,23 +569,34 @@ void UDBCombatComponent::BonesFinalized()
 	if (ActionId != ActiveActionId) { return; }
 	PreviousMeshTransform = CurrentMesh;
 	PreviousWeaponTransform = CurrentWeapon;
+	// Flush this frame's contacts before changing the montage or resetting its per-swing hit set.
+	if (BufferedAction.Id != 0 && BufferedAction.Action != EDBActionState::Evade && Position >= ActiveAttack.ComboStart)
+	{
+		TryStartAttack();
+		if (ActionId != ActiveActionId) { return; }
+	}
 	if (bAttackEndedPending) { FinishAction(ActionId, false); }
 }
 
 void UDBCombatComponent::TraceAttack(float Previous, float Current, const FTransform& CurrentMesh, const FTransform& CurrentWeapon)
 {
-	if (!ActiveAttack.OverlapsActiveWindow(Previous, Current)) { return; }
 	const uint64 ActionId = ActiveActionId;
-	const float From = FMath::Max(Previous, ActiveAttack.ActiveStart);
-	const float To = FMath::Min(Current, ActiveAttack.ActiveEnd);
-	const int32 Steps = FMath::Clamp(FMath::CeilToInt((To - From) * 120.0f), 1, 32);
-	FTransform Last = SampleWeaponTransform(From, Current, CurrentMesh, CurrentWeapon);
-	for (int32 Step = 1; Step <= Steps && ActiveActionId == ActionId; ++Step)
+	for (int32 Index = 0; Index < ActiveAttack.HitWindows.Num() && ActiveActionId == ActionId; ++Index)
 	{
-		const float Time = FMath::Lerp(From, To, static_cast<float>(Step) / Steps);
-		const FTransform Next = SampleWeaponTransform(Time, Current, CurrentMesh, CurrentWeapon);
-		SweepBlade(Last, Next, ActionId);
-		Last = Next;
+		const FDBAttackWindow Window = ActiveAttack.HitWindows[Index];
+		if (!Window.Overlaps(Previous, Current)) { continue; }
+		if (ActiveHitWindow != Index) { HitActors.Reset(); ActiveHitWindow = Index; }
+		const float From = FMath::Max(Previous, Window.Start);
+		const float To = FMath::Min(Current, Window.End);
+		const int32 Steps = FMath::Clamp(FMath::CeilToInt((To - From) * 120.0f), 1, 32);
+		FTransform Last = SampleWeaponTransform(From, Current, CurrentMesh, CurrentWeapon);
+		for (int32 Step = 1; Step <= Steps && ActiveActionId == ActionId; ++Step)
+		{
+			const float Time = FMath::Lerp(From, To, static_cast<float>(Step) / Steps);
+			const FTransform Next = SampleWeaponTransform(Time, Current, CurrentMesh, CurrentWeapon);
+			SweepBlade(Last, Next, ActionId);
+			Last = Next;
+		}
 	}
 }
 
