@@ -20,6 +20,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/RootMotionSource.h"
+#include "GenericTeamAgentInterface.h"
 #include "Misc/CoreDelegates.h"
 #include "Kismet/GameplayStatics.h"
 #include "UnrealClient.h"
@@ -678,6 +679,8 @@ void UDBCombatComponent::SweepBlade(const FTransform& From, const FTransform& To
 			AActor* Target = Hit.GetActor();
 			if (ActiveActionId != ActionId) { return; }
 			if (!IsValid(Target) || HitActors.Contains(Target)) { continue; }
+			const auto* Team = Cast<IGenericTeamAgentInterface>(CastChecked<ACharacter>(GetOwner())->GetController());
+			if (Team && Team->GetTeamAttitudeTowards(*Target) != ETeamAttitude::Hostile) { continue; }
 			const UDBHealthComponent* Health = Target->FindComponentByClass<UDBHealthComponent>();
 			if (!Health || Health->IsDead()) { continue; }
 			FCollisionQueryParams Sight = Params;
