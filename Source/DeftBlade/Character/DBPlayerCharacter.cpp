@@ -2,6 +2,8 @@
 
 #include "Camera/CameraComponent.h"
 #include "Combat/DBCombatComponent.h"
+#include "Combat/DBCollisionChannels.h"
+#include "Combat/DBHealthComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -24,6 +26,9 @@ ADBPlayerCharacter::ADBPlayerCharacter()
 	JumpMaxCount = 2;
 
 	GetCapsuleComponent()->InitCapsuleSize(42.0f, 96.0f);
+	GetCapsuleComponent()->SetCollisionResponseToChannel(DBCollision::Melee, ECR_Overlap);
+	GetMesh()->SetCollisionResponseToChannel(DBCollision::Melee, ECR_Ignore);
+	GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = false;
 	bUseControllerRotationRoll = false;
@@ -50,6 +55,7 @@ ADBPlayerCharacter::ADBPlayerCharacter()
 	FollowCamera->FieldOfView = 90.0f;
 
 	CombatComponent = CreateDefaultSubobject<UDBCombatComponent>(TEXT("Combat"));
+	HealthComponent = CreateDefaultSubobject<UDBHealthComponent>(TEXT("Health"));
 	Movement->AddTickPrerequisiteComponent(CombatComponent);
 	WeaponMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponMesh"));
 	WeaponMesh->SetupAttachment(GetMesh(), TEXT("WeaponSocket"));
@@ -59,7 +65,25 @@ ADBPlayerCharacter::ADBPlayerCharacter()
 void ADBPlayerCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+	CombatComponent->SetWeaponMesh(WeaponMesh);
+	HealthComponent->OnDeath.AddUObject(this, &ThisClass::HandleDeath);
 	ResetMovementInput();
+}
+
+float ADBPlayerCharacter::TakeDamage(float Amount, const FDamageEvent& Event, AController* EventInstigator, AActor* Causer)
+{
+	const float Applied = HealthComponent->ApplyDamage(Amount);
+	if (Applied > 0.0f) { Super::TakeDamage(Applied, Event, EventInstigator, Causer); }
+	return Applied;
+}
+
+void ADBPlayerCharacter::HandleDeath()
+{
+	CombatComponent->ResetCombat();
+	StopJumpMontages();
+	StopJumping();
+	ResetMovementInput();
+	GetCharacterMovement()->DisableMovement();
 }
 
 bool ADBPlayerCharacter::CanJumpWhileFalling() const
@@ -70,7 +94,7 @@ bool ADBPlayerCharacter::CanJumpWhileFalling() const
 
 bool ADBPlayerCharacter::CanJumpInternal_Implementation() const
 {
-	return !CombatComponent->IsAttacking() && Super::CanJumpInternal_Implementation();
+	return !HealthComponent->IsDead() && !CombatComponent->IsAttacking() && Super::CanJumpInternal_Implementation();
 }
 
 void ADBPlayerCharacter::OnJumped_Implementation()
@@ -207,6 +231,7 @@ void ADBPlayerCharacter::StopGamepadMovement()
 
 void ADBPlayerCharacter::AddCameraRelativeMovement(const FVector2D& Axes)
 {
+	if (HealthComponent->IsDead()) { return; }
 	const FRotationMatrix YawRotation(FRotator(0.0, Controller->GetControlRotation().Yaw, 0.0));
 	AddMovementInput(YawRotation.GetUnitAxis(EAxis::X), Axes.Y);
 	AddMovementInput(YawRotation.GetUnitAxis(EAxis::Y), Axes.X);

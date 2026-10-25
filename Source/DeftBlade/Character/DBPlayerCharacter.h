@@ -7,6 +7,7 @@
 class UAnimMontage;
 class UCameraComponent;
 class UDBCombatComponent;
+class UDBHealthComponent;
 class UInputAction;
 class UInputMappingContext;
 class USpringArmComponent;
@@ -23,6 +24,8 @@ public:
 	ADBPlayerCharacter();
 	virtual void PawnClientRestart() override;
 	virtual void UnPossessed() override;
+	virtual float TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent,
+		AController* EventInstigator, AActor* DamageCauser) override;
 
 protected:
 	virtual void BeginPlay() override;
@@ -40,6 +43,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
 	TObjectPtr<UDBCombatComponent> CombatComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+	TObjectPtr<UDBHealthComponent> HealthComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
 	TObjectPtr<UStaticMeshComponent> WeaponMesh;
@@ -105,6 +111,7 @@ protected:
 	FVector2D GamepadLookRate = FVector2D(180.0, 120.0);
 
 private:
+	void HandleDeath();
 	void Move(const FInputActionValue& Value);
 	void LightAttack();
 	void HeavyAttack();

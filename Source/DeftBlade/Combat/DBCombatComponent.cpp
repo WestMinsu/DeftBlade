@@ -2,16 +2,26 @@
 
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
+#include "Animation/AnimationPoseData.h"
+#include "Animation/AttributesRuntime.h"
+#include "BonePose.h"
+#include "Combat/DBCollisionChannels.h"
+#include "Combat/DBHealthComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Curves/CurveFloat.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
+#include "Engine/SkeletalMeshSocket.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshSocket.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/RootMotionSource.h"
 #include "Misc/CoreDelegates.h"
+#include "Kismet/GameplayStatics.h"
 #include "UnrealClient.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogDBCombat, Log, All);
@@ -20,7 +30,8 @@ bool FDBAttackDefinition::IsValid() const
 {
 	return Montage && FMath::IsFinite(PlayRate) && PlayRate > 0.0f
 		&& FMath::IsFinite(ActiveStart) && FMath::IsFinite(ActiveEnd)
-		&& ActiveStart >= 0.0f && ActiveEnd > ActiveStart && ActiveEnd < Montage->GetPlayLength();
+		&& ActiveStart >= 0.0f && ActiveEnd > ActiveStart && ActiveEnd < Montage->GetPlayLength()
+		&& FMath::IsFinite(Damage) && Damage > 0.0f;
 }
 
 UDBCombatComponent::UDBCombatComponent()
@@ -34,11 +45,16 @@ void UDBCombatComponent::BeginPlay()
 {
 	Super::BeginPlay();
 	FCoreDelegates::ApplicationWillDeactivateDelegate.AddUObject(this, &ThisClass::ResetCombat);
+	USkeletalMeshComponent* Mesh = CastChecked<ACharacter>(GetOwner())->GetMesh();
+	PoseFinalizedHandle = Mesh->RegisterOnBoneTransformsFinalizedDelegate(
+		FOnBoneTransformsFinalizedMultiCast::FDelegate::CreateUObject(this, &ThisClass::BonesFinalized));
 }
 
 bool UDBCombatComponent::CanProcessInput() const
 {
 	const ACharacter* Character = Cast<ACharacter>(GetOwner());
+	const UDBHealthComponent* Health = GetOwner()->FindComponentByClass<UDBHealthComponent>();
+	if (Health && Health->IsDead()) { return false; }
 	AController* Controller = Character ? Character->GetController() : nullptr;
 	if (!Controller || GetWorld()->IsPaused() || Controller->IsMoveInputIgnored())
 	{
@@ -152,10 +168,9 @@ void UDBCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		ACharacter* Character = CastChecked<ACharacter>(GetOwner());
 		UAnimInstance* Anim = Character->GetMesh()->GetAnimInstance();
 		FAnimMontageInstance* Instance = Anim ? Anim->GetMontageInstanceForID(AttackMontageInstanceId) : nullptr;
-		if (!Instance || !Character->GetCharacterMovement()->IsMovingOnGround()) { FinishAction(ActiveActionId); }
+		if (!Character->GetCharacterMovement()->IsMovingOnGround() || (!Instance && !bAttackEndedPending)) { FinishAction(ActiveActionId); }
 		else
 		{
-			SampleAttackWindow(Instance->GetPosition());
 			// Root-motion animation owns translation and facing until recovery ends.
 			Character->ConsumeMovementInputVector();
 		}
@@ -370,7 +385,7 @@ void UDBCombatComponent::TryStartAttack()
 	ACharacter* Character = CastChecked<ACharacter>(GetOwner());
 	const FDBAttackDefinition& Definition = BufferedAction.Action == EDBActionState::HeavyAttack ? HeavyAttack : LightAttack;
 	UAnimInstance* Anim = Character->GetMesh()->GetAnimInstance();
-	if (!Character->GetCharacterMovement()->IsMovingOnGround() || !Anim || !Definition.IsValid())
+	if (!Character->GetCharacterMovement()->IsMovingOnGround() || !Anim || !Definition.IsValid() || !ConfigureBlade())
 	{
 		BufferedAction = {};
 		return;
@@ -385,6 +400,10 @@ void UDBCombatComponent::TryStartAttack()
 	ActiveAttack = Definition;
 	AttackMontageInstanceId = Instance->GetInstanceID();
 	PreviousAttackPosition = 0.0f;
+	PreviousMeshTransform = Character->GetMesh()->GetComponentTransform();
+	PreviousWeaponTransform = GetWeaponTransform();
+	HitActors.Reset();
+	bAttackEndedPending = false;
 	ActiveActionId = BufferedAction.Id;
 	ActionState = BufferedAction.Action;
 	BufferedAction = {};
@@ -415,21 +434,14 @@ void UDBCombatComponent::AttackBlendingOut(UAnimMontage* Montage, bool bInterrup
 {
 	if (ActionId != ActiveActionId || !IsAttacking()) { return; }
 	if (bInterrupted) { FinishAction(ActionId); return; }
-	// The instance remains addressable by ID during blend-out, unlike the active montage map.
-	if (UAnimInstance* Anim = CastChecked<ACharacter>(GetOwner())->GetMesh()->GetAnimInstance())
-	{
-		if (FAnimMontageInstance* Instance = Anim->GetMontageInstanceForID(AttackMontageInstanceId))
-		{
-			SampleAttackWindow(Instance->GetPosition());
-		}
-	}
+	// Natural blend-out still has an instance. BonesFinalized samples its fresh pose.
 }
 
 void UDBCombatComponent::AttackEnded(UAnimMontage* Montage, bool bInterrupted, uint64 ActionId)
 {
 	if (ActionId != ActiveActionId || !IsAttacking()) { return; }
-	if (!bInterrupted) { SampleAttackWindow(ActiveAttack.Montage->GetPlayLength()); }
-	FinishAction(ActionId, bInterrupted);
+	if (bInterrupted) { FinishAction(ActionId); }
+	else { bAttackEndedPending = true; } // Flush the final interval after this frame's bone evaluation.
 }
 
 void UDBCombatComponent::StopAttackMontage()
@@ -440,6 +452,8 @@ void UDBCombatComponent::StopAttackMontage()
 	AttackMontageInstanceId = INDEX_NONE;
 	ActiveAttack = {};
 	PreviousAttackPosition = 0.0f;
+	bAttackEndedPending = false;
+	HitActors.Reset();
 	if (Instance)
 	{
 		Instance->OnMontageBlendingOutStarted.Unbind();
@@ -447,6 +461,133 @@ void UDBCombatComponent::StopAttackMontage()
 		// An interrupted pose may fade, but its attack displacement must stop now.
 		Instance->PushDisableRootMotion();
 		if (Instance->IsPlaying()) { Instance->Stop(FAlphaBlend(0.10f), true); }
+	}
+}
+
+bool UDBCombatComponent::ConfigureBlade()
+{
+	const UStaticMesh* Mesh = WeaponMesh ? WeaponMesh->GetStaticMesh() : nullptr;
+	const UStaticMeshSocket* Base = Mesh ? Mesh->FindSocket(TEXT("BladeBase")) : nullptr;
+	const UStaticMeshSocket* Tip = Mesh ? Mesh->FindSocket(TEXT("BladeTip")) : nullptr;
+	if (!Base || !Tip || !FMath::IsFinite(BladeTraceRadius) || BladeTraceRadius < 0.5f)
+	{
+		UE_LOG(LogDBCombat, Warning, TEXT("Assign a weapon with BladeBase/BladeTip sockets and a valid trace radius on %s."), *GetOwner()->GetName());
+		return false;
+	}
+	BladeBaseLocal = Base->RelativeLocation;
+	BladeTipLocal = Tip->RelativeLocation;
+	return FVector::DistSquared(BladeBaseLocal, BladeTipLocal) > 1.0;
+}
+
+FTransform UDBCombatComponent::GetWeaponTransform() const
+{
+	const USkeletalMeshComponent* Mesh = CastChecked<ACharacter>(GetOwner())->GetMesh();
+	// Attached components may update later than the bone-finalization callback.
+	return WeaponMesh->GetRelativeTransform() * Mesh->GetSocketTransform(WeaponMesh->GetAttachSocketName());
+}
+
+FTransform UDBCombatComponent::SampleWeaponTransform(float Position, float CurrentPosition,
+	const FTransform& CurrentMesh, const FTransform& CurrentWeapon) const
+{
+	if (FMath::IsNearlyEqual(Position, PreviousAttackPosition)) { return PreviousWeaponTransform; }
+	if (FMath::IsNearlyEqual(Position, CurrentPosition) && !bAttackEndedPending) { return CurrentWeapon; }
+
+	// A hitch may cross the entire hit window. Recover the authored poses inside
+	// that interval instead of tracing the later recovery pose or a single chord.
+	USkeletalMeshComponent* Mesh = CastChecked<ACharacter>(GetOwner())->GetMesh();
+	const FBoneContainer& Bones = Mesh->GetAnimInstance()->GetRequiredBones();
+	const USkeletalMeshSocket* Socket = Mesh->GetSocketByName(WeaponMesh->GetAttachSocketName());
+	const FCompactPoseBoneIndex Bone = Bones.MakeCompactPoseIndex(FMeshPoseBoneIndex(
+		Mesh->GetBoneIndex(Socket ? Socket->BoneName : WeaponMesh->GetAttachSocketName())));
+	const FAnimTrack* Track = ActiveAttack.Montage->GetAnimationData(TEXT("DefaultSlot"));
+	if (!Track || Bone == INDEX_NONE) { return CurrentWeapon; }
+
+	FMemMark Mark(FMemStack::Get());
+	FCompactPose Pose;
+	Pose.SetBoneContainer(&Bones);
+	Pose.ResetToRefPose();
+	FBlendedCurve Curve;
+	Curve.InitFrom(Bones);
+	UE::Anim::FStackAttributeContainer Attributes;
+	FAnimationPoseData Data(Pose, Curve, Attributes);
+	Track->GetAnimationPose(Data, FAnimExtractContext(Position, true));
+	FCSPose<FCompactPose> ComponentPose;
+	ComponentPose.InitPose(Pose);
+	FTransform MeshAtTime;
+	const float Alpha = FMath::Clamp((Position - PreviousAttackPosition) / (CurrentPosition - PreviousAttackPosition), 0.0f, 1.0f);
+	MeshAtTime.Blend(PreviousMeshTransform, CurrentMesh, Alpha);
+	const FTransform SocketLocal = Socket ? Socket->GetSocketLocalTransform() : FTransform::Identity;
+	return WeaponMesh->GetRelativeTransform() * SocketLocal * ComponentPose.GetComponentSpaceTransform(Bone) * MeshAtTime;
+}
+
+void UDBCombatComponent::BonesFinalized()
+{
+	if (!IsAttacking() || !CanProcessInput()) { return; }
+	ACharacter* Character = CastChecked<ACharacter>(GetOwner());
+	UAnimInstance* Anim = Character->GetMesh()->GetAnimInstance();
+	const FAnimMontageInstance* Instance = Anim ? Anim->GetMontageInstanceForID(AttackMontageInstanceId) : nullptr;
+	if (!Instance && !bAttackEndedPending) { return; }
+	const uint64 ActionId = ActiveActionId;
+	const float Position = bAttackEndedPending ? ActiveAttack.Montage->GetPlayLength() : Instance->GetPosition();
+	const FTransform CurrentMesh = Character->GetMesh()->GetComponentTransform();
+	const FTransform CurrentWeapon = GetWeaponTransform();
+	TraceAttack(PreviousAttackPosition, Position, CurrentMesh, CurrentWeapon);
+	if (ActionId != ActiveActionId) { return; } // Damage callbacks may interrupt or kill the attacker.
+	SampleAttackWindow(Position);
+	if (ActionId != ActiveActionId) { return; }
+	PreviousMeshTransform = CurrentMesh;
+	PreviousWeaponTransform = CurrentWeapon;
+	if (bAttackEndedPending) { FinishAction(ActionId, false); }
+}
+
+void UDBCombatComponent::TraceAttack(float Previous, float Current, const FTransform& CurrentMesh, const FTransform& CurrentWeapon)
+{
+	if (!ActiveAttack.OverlapsActiveWindow(Previous, Current)) { return; }
+	const uint64 ActionId = ActiveActionId;
+	const float From = FMath::Max(Previous, ActiveAttack.ActiveStart);
+	const float To = FMath::Min(Current, ActiveAttack.ActiveEnd);
+	const int32 Steps = FMath::Clamp(FMath::CeilToInt((To - From) * 120.0f), 1, 32);
+	FTransform Last = SampleWeaponTransform(From, Current, CurrentMesh, CurrentWeapon);
+	for (int32 Step = 1; Step <= Steps && ActiveActionId == ActionId; ++Step)
+	{
+		const float Time = FMath::Lerp(From, To, static_cast<float>(Step) / Steps);
+		const FTransform Next = SampleWeaponTransform(Time, Current, CurrentMesh, CurrentWeapon);
+		SweepBlade(Last, Next, ActionId);
+		Last = Next;
+	}
+}
+
+void UDBCombatComponent::SweepBlade(const FTransform& From, const FTransform& To, uint64 ActionId)
+{
+	const double Length = FMath::Max(From.TransformVector(BladeTipLocal - BladeBaseLocal).Size(),
+		To.TransformVector(BladeTipLocal - BladeBaseLocal).Size());
+	const int32 Samples = FMath::Clamp(FMath::CeilToInt(Length / (BladeTraceRadius * 2.0f)), 1, 64);
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(DBBlade), false, GetOwner());
+	TArray<FHitResult> Hits;
+	for (int32 Sample = 0; Sample <= Samples && ActiveActionId == ActionId; ++Sample)
+	{
+		const FVector Local = FMath::Lerp(BladeBaseLocal, BladeTipLocal, static_cast<float>(Sample) / Samples);
+		Hits.Reset();
+		GetWorld()->SweepMultiByChannel(Hits, From.TransformPosition(Local), To.TransformPosition(Local),
+			FQuat::Identity, DBCollision::Melee, FCollisionShape::MakeSphere(BladeTraceRadius), Params);
+		for (const FHitResult& Hit : Hits)
+		{
+			AActor* Target = Hit.GetActor();
+			if (ActiveActionId != ActionId) { return; }
+			if (!IsValid(Target) || HitActors.Contains(Target)) { continue; }
+			const UDBHealthComponent* Health = Target->FindComponentByClass<UDBHealthComponent>();
+			if (!Health || Health->IsDead()) { continue; }
+			FCollisionQueryParams Sight = Params;
+			Sight.AddIgnoredActor(Target);
+			FHitResult Obstruction;
+			if (GetWorld()->LineTraceSingleByChannel(Obstruction, GetOwner()->GetActorLocation(), Hit.ImpactPoint,
+				DBCollision::Melee, Sight)) { continue; }
+			// One contact attempt per actor/window, even when that target rejects it via i-frames.
+			HitActors.Add(Target);
+			UGameplayStatics::ApplyPointDamage(Target, ActiveAttack.Damage,
+				(To.TransformPosition(Local) - From.TransformPosition(Local)).GetSafeNormal(), Hit,
+				CastChecked<ACharacter>(GetOwner())->GetController(), GetOwner(), nullptr);
+		}
 	}
 }
 
@@ -499,7 +640,7 @@ void UDBCombatComponent::ResetCombat()
 		UE_LOG(LogDBCombat, Verbose, TEXT("%s reset active #%llu / pending #%llu"),
 			*GetOwner()->GetName(), ActiveActionId, BufferedAction.Id);
 	}
-	FinishAction(ActiveActionId, false);
+	FinishAction(ActiveActionId);
 	// Reset also stops any residual blend-out after an interruption.
 	StopEvadeMontage();
 	BufferedAction = {};
@@ -509,6 +650,10 @@ void UDBCombatComponent::ResetCombat()
 void UDBCombatComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	FCoreDelegates::ApplicationWillDeactivateDelegate.RemoveAll(this);
+	if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
+	{
+		Character->GetMesh()->UnregisterOnBoneTransformsFinalizedDelegate(PoseFinalizedHandle);
+	}
 	ResetCombat();
 	Super::EndPlay(EndPlayReason);
 }

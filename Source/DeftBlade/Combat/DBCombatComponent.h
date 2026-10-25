@@ -6,6 +6,7 @@
 
 class UAnimMontage;
 class UCurveFloat;
+class UStaticMeshComponent;
 
 UENUM(BlueprintType)
 enum class EDBActionState : uint8
@@ -55,6 +56,9 @@ struct FDBAttackDefinition
 	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"))
 	float ActiveEnd = 0.35f;
 
+	UPROPERTY(EditAnywhere, meta = (ClampMin = "0.01"))
+	float Damage = 25.0f;
+
 	bool IsValid() const;
 	bool OverlapsActiveWindow(float Previous, float Current) const
 	{
@@ -75,6 +79,7 @@ public:
 
 	void RequestEvade();
 	void RequestAttack(bool bHeavy);
+	void SetWeaponMesh(UStaticMeshComponent* InWeapon) { WeaponMesh = InWeapon; }
 	void SetEvadeHeld(bool bHeld, float SprintSpeed) { bEvadeHeld = bHeld; HeldGlideSpeed = SprintSpeed; }
 	bool TryTransitionToSprint();
 	void ResetAirEvade() { bAirEvadeUsed = false; }
@@ -106,6 +111,9 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Attack")
 	FDBAttackDefinition HeavyAttack;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Trace", meta = (ClampMin = "0.5"))
+	float BladeTraceRadius = 3.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0.01"))
 	double EvadeDuration = 0.80;
@@ -170,6 +178,12 @@ private:
 	void AttackBlendingOut(UAnimMontage* Montage, bool bInterrupted, uint64 ActionId);
 	void AttackEnded(UAnimMontage* Montage, bool bInterrupted, uint64 ActionId);
 	void StopAttackMontage();
+	void BonesFinalized();
+	bool ConfigureBlade();
+	FTransform GetWeaponTransform() const;
+	FTransform SampleWeaponTransform(float Position, float CurrentPosition, const FTransform& CurrentMesh, const FTransform& CurrentWeapon) const;
+	void TraceAttack(float Previous, float Current, const FTransform& CurrentMesh, const FTransform& CurrentWeapon);
+	void SweepBlade(const FTransform& From, const FTransform& To, uint64 ActionId);
 	void UpdateEvadeMovement(float DeltaTime);
 	bool IsEvadeMontageActive() const;
 	void StopEvadeMovement(bool bStopHorizontalVelocity = true);
@@ -192,4 +206,13 @@ private:
 	FDBAttackDefinition ActiveAttack;
 	int32 AttackMontageInstanceId = INDEX_NONE;
 	float PreviousAttackPosition = 0.0f;
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMeshComponent> WeaponMesh;
+	FDelegateHandle PoseFinalizedHandle;
+	FTransform PreviousMeshTransform;
+	FTransform PreviousWeaponTransform;
+	FVector BladeBaseLocal = FVector::ZeroVector;
+	FVector BladeTipLocal = FVector::ZeroVector;
+	TSet<TWeakObjectPtr<AActor>> HitActors;
+	bool bAttackEndedPending = false;
 };
