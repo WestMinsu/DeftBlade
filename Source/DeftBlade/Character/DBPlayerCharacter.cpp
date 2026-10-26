@@ -4,6 +4,7 @@
 #include "Combat/DBCombatComponent.h"
 #include "Combat/DBCollisionChannels.h"
 #include "Combat/DBHealthComponent.h"
+#include "Combat/DBTargetingComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -56,6 +57,7 @@ ADBPlayerCharacter::ADBPlayerCharacter()
 
 	CombatComponent = CreateDefaultSubobject<UDBCombatComponent>(TEXT("Combat"));
 	HealthComponent = CreateDefaultSubobject<UDBHealthComponent>(TEXT("Health"));
+	TargetingComponent = CreateDefaultSubobject<UDBTargetingComponent>(TEXT("Targeting"));
 	Movement->AddTickPrerequisiteComponent(CombatComponent);
 	WeaponMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponMesh"));
 	WeaponMesh->SetupAttachment(GetMesh(), TEXT("WeaponSocket"));
@@ -66,8 +68,29 @@ void ADBPlayerCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	CombatComponent->SetWeaponMesh(WeaponMesh);
+	CombatComponent->OnAttackStarted.AddUObject(this, &ThisClass::AssistAttackFacing);
 	HealthComponent->OnDeath.AddUObject(this, &ThisClass::HandleDeath);
 	ResetMovementInput();
+}
+
+void ADBPlayerCharacter::AssistAttackFacing()
+{
+	const APlayerController* PC = Cast<APlayerController>(Controller);
+	const UEnhancedPlayerInput* Input = PC ? Cast<UEnhancedPlayerInput>(PC->PlayerInput) : nullptr;
+	FVector Direction = GetActorForwardVector();
+	if (Input)
+	{
+		const FVector2D Keyboard = MoveAction ? Input->GetActionValue(MoveAction).Get<FVector2D>() : FVector2D::ZeroVector;
+		const FVector2D Gamepad = GamepadMoveAction ? Input->GetActionValue(GamepadMoveAction).Get<FVector2D>() : FVector2D::ZeroVector;
+		const FVector2D Axes = Keyboard + Gamepad.GetSafeNormal();
+		if (!Axes.IsNearlyZero())
+		{
+			const FRotationMatrix Yaw(FRotator(0, PC->GetControlRotation().Yaw, 0));
+			Direction = Yaw.GetUnitAxis(EAxis::X) * Axes.Y + Yaw.GetUnitAxis(EAxis::Y) * Axes.X;
+		}
+	}
+	// Read the current action values: combat may already have consumed CMC's pending movement this frame.
+	TargetingComponent->AssistAttackFacing(Direction);
 }
 
 float ADBPlayerCharacter::TakeDamage(float Amount, const FDamageEvent& Event, AController* EventInstigator, AActor* Causer)

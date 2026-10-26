@@ -117,6 +117,7 @@ struct FDBAttackDefinition
 };
 
 DECLARE_MULTICAST_DELEGATE_TwoParams(FDBAttackWindowTraversed, float, float);
+DECLARE_MULTICAST_DELEGATE(FDBAttackStarted);
 
 /** Owns action lifetime, one buffered input and finite ground/air evades. */
 UCLASS(ClassGroup = (DeftBlade), meta = (BlueprintSpawnableComponent))
@@ -149,6 +150,8 @@ public:
 	bool IsAttackWindowOpen() const;
 	/** Swept montage-time interval; a long frame crossing the whole window still emits once. */
 	FDBAttackWindowTraversed OnAttackWindowTraversed;
+	/** Accepted montage start, including buffered combo links; before the initial blade snapshot. */
+	FDBAttackStarted OnAttackStarted;
 
 protected:
 	virtual void BeginPlay() override;

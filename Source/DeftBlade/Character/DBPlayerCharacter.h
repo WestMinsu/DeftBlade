@@ -8,6 +8,7 @@ class UAnimMontage;
 class UCameraComponent;
 class UDBCombatComponent;
 class UDBHealthComponent;
+class UDBTargetingComponent;
 class UInputAction;
 class UInputMappingContext;
 class USpringArmComponent;
@@ -46,6 +47,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
 	TObjectPtr<UDBHealthComponent> HealthComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+	TObjectPtr<UDBTargetingComponent> TargetingComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
 	TObjectPtr<UStaticMeshComponent> WeaponMesh;
@@ -111,6 +115,7 @@ protected:
 	FVector2D GamepadLookRate = FVector2D(180.0, 120.0);
 
 private:
+	void AssistAttackFacing();
 	void HandleDeath();
 	void Move(const FInputActionValue& Value);
 	void LightAttack();

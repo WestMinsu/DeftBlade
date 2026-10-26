@@ -484,8 +484,6 @@ void UDBCombatComponent::TryStartAttack()
 	ActiveHitWindow = INDEX_NONE;
 	AttackMontageInstanceId = Instance->GetInstanceID();
 	PreviousAttackPosition = 0.0f;
-	PreviousMeshTransform = Character->GetMesh()->GetComponentTransform();
-	PreviousWeaponTransform = GetWeaponTransform();
 	HitActors.Reset();
 	bAttackEndedPending = false;
 	ActiveActionId = BufferedAction.Id;
@@ -495,6 +493,9 @@ void UDBCombatComponent::TryStartAttack()
 	if (!bContinuing) { Character->GetCharacterMovement()->StopMovementImmediately(); }
 	Instance->OnMontageBlendingOutStarted.BindUObject(this, &ThisClass::AttackBlendingOut, ActiveActionId);
 	Instance->OnMontageEnded.BindUObject(this, &ThisClass::AttackEnded, ActiveActionId);
+	OnAttackStarted.Broadcast();
+	PreviousMeshTransform = Character->GetMesh()->GetComponentTransform();
+	PreviousWeaponTransform = GetWeaponTransform();
 }
 
 void UDBCombatComponent::SampleAttackWindow(float Position)
