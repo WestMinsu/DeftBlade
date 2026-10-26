@@ -2,6 +2,9 @@
 
 #include "Animation/WidgetAnimation.h"
 #include "Combat/DBHealthComponent.h"
+#include "Combat/DBTargetingComponent.h"
+#include "Blueprint/WidgetLayoutLibrary.h"
+#include "Components/CanvasPanelSlot.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
 #include "Components/ProgressBar.h"
@@ -37,6 +40,8 @@ void UDBPlayerHUDWidget::BindHealth(UDBHealthComponent* Health)
 	DeathPanel->SetVisibility(ESlateVisibility::Collapsed);
 	RetryButton->SetIsEnabled(true);
 	HealthSource = Health;
+	TargetingSource = Health ? Health->GetOwner()->FindComponentByClass<UDBTargetingComponent>() : nullptr;
+	LockOnMarker->SetVisibility(ESlateVisibility::Collapsed);
 	// An initial snapshot is not damage, even when binding to an already wounded pawn.
 	PreviousHealth = Health ? Health->GetHealth() : 0;
 	HealthChanged(PreviousHealth, Health ? Health->GetMaxHealth() : 0);
@@ -100,4 +105,17 @@ void UDBPlayerHUDWidget::NativeDestruct()
 {
 	BindHealth(nullptr);
 	Super::NativeDestruct();
+}
+
+void UDBPlayerHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+	Super::NativeTick(MyGeometry, InDeltaTime);
+	FVector2D Position;
+	if (!bShowingDeath && TargetingSource.IsValid() && TargetingSource->IsLockedOn()
+		&& UWidgetLayoutLibrary::ProjectWorldLocationToWidgetPosition(GetOwningPlayer(), TargetingSource->GetTargetPoint(), Position, true))
+	{
+		CastChecked<UCanvasPanelSlot>(LockOnMarker->Slot)->SetPosition(Position);
+		LockOnMarker->SetVisibility(ESlateVisibility::HitTestInvisible);
+	}
+	else { LockOnMarker->SetVisibility(ESlateVisibility::Collapsed); }
 }

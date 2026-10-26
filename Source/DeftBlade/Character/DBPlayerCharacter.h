@@ -89,6 +89,10 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> HeavyAttackAction;
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> LockOnAction;
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> SwitchTargetAction;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Movement", meta = (ClampMin = "0"))
 	float RunSpeed = 600.0f;
@@ -122,7 +126,11 @@ private:
 	void HeavyAttack();
 	void MoveGamepad(const FInputActionValue& Value);
 	void StopGamepadMovement();
-	void AddCameraRelativeMovement(const FVector2D& Axes);
+	void AddDirectionalMovement(const FVector2D& Axes);
+	void ToggleLockOn();
+	void SwitchTarget(const FInputActionValue& Value);
+	void StopSwitchTarget();
+	void StopLookGamepad();
 	void LookMouse(const FInputActionValue& Value);
 	void LookGamepad(const FInputActionValue& Value);
 	void StartWalking();
@@ -141,4 +149,5 @@ private:
 	bool bGamepadRunSelected = false;
 	bool bUsingGamepadMovement = false;
 	bool bSprinting = false;
+	float SwitchInputDirection = 0;
 };

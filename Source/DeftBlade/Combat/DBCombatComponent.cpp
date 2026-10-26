@@ -7,6 +7,7 @@
 #include "BonePose.h"
 #include "Combat/DBCollisionChannels.h"
 #include "Combat/DBHealthComponent.h"
+#include "Combat/DBTargetingComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Curves/CurveFloat.h"
@@ -359,8 +360,10 @@ void UDBCombatComponent::TryStartEvade(double Now)
 		return;
 	}
 	FVector Direction = Character->GetPendingMovementInputVector().GetSafeNormal2D();
-	const bool bStartBackward = Direction.IsNearlyZero();
-	if (bStartBackward)
+	const auto* Targeting = Character->FindComponentByClass<UDBTargetingComponent>();
+	const bool bStartBackward = Direction.IsNearlyZero() || (Targeting && Targeting->IsLockedOn()
+		&& FVector::DotProduct(Direction, Character->GetActorForwardVector()) < -0.5);
+	if (Direction.IsNearlyZero())
 	{
 		Direction = -Character->GetActorForwardVector().GetSafeNormal2D();
 	}

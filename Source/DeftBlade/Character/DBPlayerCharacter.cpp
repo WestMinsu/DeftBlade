@@ -58,6 +58,7 @@ ADBPlayerCharacter::ADBPlayerCharacter()
 	CombatComponent = CreateDefaultSubobject<UDBCombatComponent>(TEXT("Combat"));
 	HealthComponent = CreateDefaultSubobject<UDBHealthComponent>(TEXT("Health"));
 	TargetingComponent = CreateDefaultSubobject<UDBTargetingComponent>(TEXT("Targeting"));
+	CombatComponent->AddTickPrerequisiteComponent(TargetingComponent);
 	Movement->AddTickPrerequisiteComponent(CombatComponent);
 	WeaponMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponMesh"));
 	WeaponMesh->SetupAttachment(GetMesh(), TEXT("WeaponSocket"));
@@ -102,6 +103,7 @@ float ADBPlayerCharacter::TakeDamage(float Amount, const FDamageEvent& Event, AC
 
 void ADBPlayerCharacter::HandleDeath()
 {
+	TargetingComponent->ClearLockOn();
 	CombatComponent->ResetCombat();
 	StopJumpMontages();
 	StopJumping();
@@ -171,9 +173,9 @@ void ADBPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 		return;
 	}
 	if (!MoveAction || !GamepadMoveAction || !MouseLookAction || !GamepadLookAction || !JumpAction || !WalkAction || !EvadeAction
-		|| !LightAttackAction || !HeavyAttackAction)
+		|| !LightAttackAction || !HeavyAttackAction || !LockOnAction || !SwitchTargetAction)
 	{
-		UE_LOG(LogDBPlayer, Error, TEXT("Assign all nine input actions on %s's Blueprint defaults."), *GetName());
+		UE_LOG(LogDBPlayer, Error, TEXT("Assign all eleven input actions on %s's Blueprint defaults."), *GetName());
 		return;
 	}
 
@@ -185,6 +187,12 @@ void ADBPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	Input->BindAction(GamepadMoveAction, ETriggerEvent::Canceled, this, &ThisClass::StopGamepadMovement);
 	Input->BindAction(MouseLookAction, ETriggerEvent::Triggered, this, &ThisClass::LookMouse);
 	Input->BindAction(GamepadLookAction, ETriggerEvent::Triggered, this, &ThisClass::LookGamepad);
+	Input->BindAction(GamepadLookAction, ETriggerEvent::Completed, this, &ThisClass::StopLookGamepad);
+	Input->BindAction(GamepadLookAction, ETriggerEvent::Canceled, this, &ThisClass::StopLookGamepad);
+	Input->BindAction(LockOnAction, ETriggerEvent::Started, this, &ThisClass::ToggleLockOn);
+	Input->BindAction(SwitchTargetAction, ETriggerEvent::Triggered, this, &ThisClass::SwitchTarget);
+	Input->BindAction(SwitchTargetAction, ETriggerEvent::Completed, this, &ThisClass::StopSwitchTarget);
+	Input->BindAction(SwitchTargetAction, ETriggerEvent::Canceled, this, &ThisClass::StopSwitchTarget);
 	Input->BindAction(JumpAction, ETriggerEvent::Started, CombatComponent.Get(), &UDBCombatComponent::RequestJump);
 	Input->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
 	Input->BindAction(JumpAction, ETriggerEvent::Canceled, this, &ACharacter::StopJumping);
@@ -218,7 +226,7 @@ void ADBPlayerCharacter::Move(const FInputActionValue& Value)
 	}
 
 	bUsingGamepadMovement = false;
-	AddCameraRelativeMovement(Value.Get<FVector2D>());
+	AddDirectionalMovement(Value.Get<FVector2D>());
 	UpdateSprint();
 }
 
@@ -238,7 +246,7 @@ void ADBPlayerCharacter::MoveGamepad(const FInputActionValue& Value)
 	const float Threshold = bGamepadRunSelected ? FMath::Min(GamepadWalkThreshold, GamepadRunThreshold) : GamepadRunThreshold;
 	bGamepadRunSelected = Axes.Size() >= Threshold;
 	bUsingGamepadMovement = true;
-	AddCameraRelativeMovement(Axes.GetSafeNormal());
+	AddDirectionalMovement(Axes.GetSafeNormal());
 	UpdateSprint();
 }
 
@@ -252,9 +260,16 @@ void ADBPlayerCharacter::StopGamepadMovement()
 	}
 }
 
-void ADBPlayerCharacter::AddCameraRelativeMovement(const FVector2D& Axes)
+void ADBPlayerCharacter::AddDirectionalMovement(const FVector2D& Axes)
 {
 	if (HealthComponent->IsDead()) { return; }
+	if (AActor* Target = TargetingComponent->GetLockedTarget(); TargetingComponent->IsLockedOn() && Target)
+	{
+		const FVector Forward = (Target->GetActorLocation() - GetActorLocation()).GetSafeNormal2D();
+		AddMovementInput(Forward, Axes.Y);
+		AddMovementInput(FVector::CrossProduct(FVector::UpVector, Forward), Axes.X);
+		return;
+	}
 	const FRotationMatrix YawRotation(FRotator(0.0, Controller->GetControlRotation().Yaw, 0.0));
 	AddMovementInput(YawRotation.GetUnitAxis(EAxis::X), Axes.Y);
 	AddMovementInput(YawRotation.GetUnitAxis(EAxis::Y), Axes.X);
@@ -262,6 +277,7 @@ void ADBPlayerCharacter::AddCameraRelativeMovement(const FVector2D& Axes)
 
 void ADBPlayerCharacter::LookMouse(const FInputActionValue& Value)
 {
+	if (TargetingComponent->IsLockedOn()) { return; }
 	const FVector2D Delta = Value.Get<FVector2D>();
 	AddControllerYawInput(Delta.X * MouseSensitivity.X);
 	AddControllerPitchInput(Delta.Y * MouseSensitivity.Y);
@@ -270,9 +286,42 @@ void ADBPlayerCharacter::LookMouse(const FInputActionValue& Value)
 void ADBPlayerCharacter::LookGamepad(const FInputActionValue& Value)
 {
 	const FVector2D Stick = Value.Get<FVector2D>();
+	if (TargetingComponent->IsLockedOn()) { TargetingComponent->HandleStickSwitch(Stick.X); return; }
 	const float DeltaSeconds = GetWorld()->GetDeltaSeconds();
 	AddControllerYawInput(Stick.X * GamepadLookRate.X * DeltaSeconds);
 	AddControllerPitchInput(Stick.Y * GamepadLookRate.Y * DeltaSeconds);
+}
+
+void ADBPlayerCharacter::StopLookGamepad()
+{
+	TargetingComponent->HandleStickSwitch(0);
+}
+
+void ADBPlayerCharacter::ToggleLockOn()
+{
+	TargetingComponent->ToggleLockOn();
+	if (TargetingComponent->IsLockedOn())
+	{
+		StopSprinting();
+		const auto* PC = Cast<APlayerController>(Controller);
+		const auto* Input = PC ? Cast<UEnhancedPlayerInput>(PC->PlayerInput) : nullptr;
+		if (Input && GamepadLookAction) { TargetingComponent->HandleStickSwitch(Input->GetActionValue(GamepadLookAction).Get<FVector2D>().X); }
+	}
+}
+
+void ADBPlayerCharacter::SwitchTarget(const FInputActionValue& Value)
+{
+	const float Direction = FMath::Sign(Value.Get<float>());
+	if (Direction != SwitchInputDirection)
+	{
+		SwitchInputDirection = Direction;
+		TargetingComponent->SwitchTarget(Direction);
+	}
+}
+
+void ADBPlayerCharacter::StopSwitchTarget()
+{
+	SwitchInputDirection = 0;
 }
 
 void ADBPlayerCharacter::StartWalking()
@@ -322,6 +371,7 @@ void ADBPlayerCharacter::RefreshMovementSpeed()
 
 void ADBPlayerCharacter::ResetMovementInput()
 {
+	StopSwitchTarget();
 	bGamepadRunSelected = false;
 	bUsingGamepadMovement = false;
 	StopSprinting();
@@ -333,6 +383,7 @@ void ADBPlayerCharacter::PawnClientRestart()
 	Super::PawnClientRestart();
 	AddMappingContext();
 	CombatComponent->AddTickPrerequisiteActor(Controller);
+	TargetingComponent->AddTickPrerequisiteActor(Controller);
 	if (!bInitialCameraRotationApplied && IsLocallyControlled())
 	{
 		// GameMode sets ControlRotation after possession; apply the starting pitch afterward.
@@ -390,6 +441,8 @@ void ADBPlayerCharacter::ReleaseMappingContext()
 
 void ADBPlayerCharacter::UnPossessed()
 {
+	TargetingComponent->ClearLockOn();
+	TargetingComponent->RemoveTickPrerequisiteActor(Controller);
 	CombatComponent->ResetCombat();
 	CombatComponent->RemoveTickPrerequisiteActor(Controller);
 	StopJumpMontages();

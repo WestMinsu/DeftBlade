@@ -7,6 +7,7 @@
 class UBorder;
 class UButton;
 class UDBHealthComponent;
+class UDBTargetingComponent;
 class UProgressBar;
 class UTextBlock;
 class UWidgetAnimation;
@@ -22,6 +23,7 @@ protected:
 	virtual void NativeOnInitialized() override;
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UProgressBar> HealthBar;
@@ -35,6 +37,8 @@ protected:
 	TObjectPtr<UButton> RetryButton;
 	UPROPERTY(Transient, meta = (BindWidgetAnim))
 	TObjectPtr<UWidgetAnimation> DamageFlashAnimation;
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UWidget> LockOnMarker;
 
 private:
 	void HealthChanged(float Current, float Maximum);
@@ -44,6 +48,7 @@ private:
 	void Retry();
 
 	TWeakObjectPtr<UDBHealthComponent> HealthSource;
+	TWeakObjectPtr<UDBTargetingComponent> TargetingSource;
 	float PreviousHealth = 0;
 	bool bShowingDeath = false;
 	bool bRetryRequested = false;
