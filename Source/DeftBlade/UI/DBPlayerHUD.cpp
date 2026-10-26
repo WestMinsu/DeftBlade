@@ -8,10 +8,16 @@ void ADBPlayerHUD::BeginPlay()
 {
 	Super::BeginPlay();
 	APlayerController* PC = GetOwningPlayerController();
-	if (!PC || !PC->IsLocalController() || !WidgetClass) { return; }
+	if (!PC || !PC->IsLocalController() || !WidgetClass)
+	{
+		return;
+	}
 	SetActorTickEnabled(false);
 	PlayerWidget = CreateWidget<UDBPlayerHUDWidget>(PC, WidgetClass);
-	if (!PlayerWidget) { return; }
+	if (!PlayerWidget)
+	{
+		return;
+	}
 	PlayerWidget->AddToPlayerScreen();
 	PC->OnPossessedPawnChanged.AddDynamic(this, &ThisClass::PawnChanged);
 	PawnChanged(nullptr, PC->GetPawn());
@@ -19,12 +25,18 @@ void ADBPlayerHUD::BeginPlay()
 
 void ADBPlayerHUD::PawnChanged(APawn*, APawn* NewPawn)
 {
-	if (PlayerWidget) { PlayerWidget->BindHealth(NewPawn ? NewPawn->FindComponentByClass<UDBHealthComponent>() : nullptr); }
+	if (PlayerWidget)
+	{
+		PlayerWidget->BindHealth(NewPawn ? NewPawn->FindComponentByClass<UDBHealthComponent>() : nullptr);
+	}
 }
 
 void ADBPlayerHUD::EndPlay(const EEndPlayReason::Type Reason)
 {
-	if (APlayerController* PC = GetOwningPlayerController()) { PC->OnPossessedPawnChanged.RemoveDynamic(this, &ThisClass::PawnChanged); }
+	if (APlayerController* PC = GetOwningPlayerController())
+	{
+		PC->OnPossessedPawnChanged.RemoveDynamic(this, &ThisClass::PawnChanged);
+	}
 	if (PlayerWidget)
 	{
 		PlayerWidget->BindHealth(nullptr);

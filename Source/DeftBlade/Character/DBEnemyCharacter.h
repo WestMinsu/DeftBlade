@@ -17,10 +17,17 @@ class DEFTBLADE_API ADBEnemyCharacter : public ACharacter
 	GENERATED_BODY()
 public:
 	ADBEnemyCharacter();
-	virtual float TakeDamage(float Amount, const FDamageEvent& Event, AController* EventInstigator, AActor* Causer) override;
+	virtual float TakeDamage(
+	    float Amount, const FDamageEvent& Event, AController* EventInstigator, AActor* Causer) override;
 	bool CanAct() const;
-	UBehaviorTree* GetBehaviorTree() const { return BehaviorTree; }
-	float GetAttackRange() const { return AttackRange; }
+	UBehaviorTree* GetBehaviorTree() const
+	{
+		return BehaviorTree;
+	}
+	float GetAttackRange() const
+	{
+		return AttackRange;
+	}
 
 protected:
 	virtual void BeginPlay() override;

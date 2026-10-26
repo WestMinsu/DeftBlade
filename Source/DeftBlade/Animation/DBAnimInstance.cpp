@@ -11,8 +11,10 @@ void UDBAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	const APawn* Pawn = TryGetPawnOwner();
 	const UDBTargetingComponent* Targeting = Pawn ? Pawn->FindComponentByClass<UDBTargetingComponent>() : nullptr;
 	const ACharacter* Character = Cast<ACharacter>(Pawn);
-	bUseLockLocomotion = Targeting && Targeting->IsLockedOn() && Character && Character->GetCharacterMovement()->IsMovingOnGround();
-	const FVector LocalVelocity = Pawn ? Pawn->GetActorRotation().UnrotateVector(Pawn->GetVelocity()) : FVector::ZeroVector;
+	bUseLockLocomotion =
+	    Targeting && Targeting->IsLockedOn() && Character && Character->GetCharacterMovement()->IsMovingOnGround();
+	const FVector LocalVelocity =
+	    Pawn ? Pawn->GetActorRotation().UnrotateVector(Pawn->GetVelocity()) : FVector::ZeroVector;
 	LockForwardSpeed = LocalVelocity.X;
 	LockRightSpeed = LocalVelocity.Y;
 }

@@ -17,12 +17,19 @@ public:
 	void ClearLockOn();
 	void SwitchTarget(float Direction);
 	void HandleStickSwitch(float Axis);
-	bool IsLockedOn() const { return bLockOnActive && LockedTarget.IsValid(); }
-	AActor* GetLockedTarget() const { return LockedTarget.Get(); }
+	bool IsLockedOn() const
+	{
+		return bLockOnActive && LockedTarget.IsValid();
+	}
+	AActor* GetLockedTarget() const
+	{
+		return LockedTarget.Get();
+	}
 	FVector GetTargetPoint() const;
 
 protected:
-	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+	virtual void TickComponent(
+	    float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 
 protected:

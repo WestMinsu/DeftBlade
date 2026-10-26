@@ -17,11 +17,20 @@ public:
 	float ApplyDamage(float Amount);
 
 	UFUNCTION(BlueprintPure, Category = "Health")
-	float GetHealth() const { return Health; }
+	float GetHealth() const
+	{
+		return Health;
+	}
 	UFUNCTION(BlueprintPure, Category = "Health")
-	float GetMaxHealth() const { return MaxHealth; }
+	float GetMaxHealth() const
+	{
+		return MaxHealth;
+	}
 	UFUNCTION(BlueprintPure, Category = "Health")
-	bool IsDead() const { return Health <= 0.0f; }
+	bool IsDead() const
+	{
+		return Health <= 0.0f;
+	}
 
 	FDBHealthChanged OnHealthChanged;
 	FSimpleMulticastDelegate OnDeath;

@@ -13,10 +13,13 @@ class DEFTBLADE_API UBTTask_DBMeleeAttack : public UBTTaskNode
 public:
 	UBTTask_DBMeleeAttack();
 	virtual EBTNodeResult::Type ExecuteTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) override;
+
 protected:
 	virtual void TickTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory, float DeltaSeconds) override;
 	virtual EBTNodeResult::Type AbortTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) override;
-	virtual void OnTaskFinished(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory, EBTNodeResult::Type Result) override;
+	virtual void OnTaskFinished(
+	    UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory, EBTNodeResult::Type Result) override;
+
 private:
 	void CancelOwnedAttack();
 	TWeakObjectPtr<UDBCombatComponent> Combat;

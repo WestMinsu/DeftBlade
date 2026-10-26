@@ -27,7 +27,10 @@ void UDBPlayerHUDWidget::NativeConstruct()
 
 void UDBPlayerHUDWidget::BindHealth(UDBHealthComponent* Health)
 {
-	if (Health && HealthSource.Get() == Health) { return; }
+	if (Health && HealthSource.Get() == Health)
+	{
+		return;
+	}
 	if (HealthSource.IsValid())
 	{
 		HealthSource->OnHealthChanged.RemoveAll(this);
@@ -49,7 +52,10 @@ void UDBPlayerHUDWidget::BindHealth(UDBHealthComponent* Health)
 	{
 		Health->OnHealthChanged.AddUObject(this, &ThisClass::HealthChanged);
 		Health->OnDeath.AddUObject(this, &ThisClass::ShowDeath);
-		if (Health->IsDead()) { ShowDeath(); }
+		if (Health->IsDead())
+		{
+			ShowDeath();
+		}
 	}
 }
 
@@ -57,7 +63,7 @@ void UDBPlayerHUDWidget::HealthChanged(float Current, float Maximum)
 {
 	HealthBar->SetPercent(Maximum > 0 ? FMath::Clamp(Current / Maximum, 0.f, 1.f) : 0);
 	HealthText->SetText(FText::Format(NSLOCTEXT("DeftBlade", "PlayerHP", "{0} / {1}"),
-		FText::AsNumber(FMath::CeilToInt(Current)), FText::AsNumber(FMath::CeilToInt(Maximum))));
+	    FText::AsNumber(FMath::CeilToInt(Current)), FText::AsNumber(FMath::CeilToInt(Maximum))));
 	if (Current < PreviousHealth)
 	{
 		StopAnimation(DamageFlashAnimation);
@@ -68,7 +74,10 @@ void UDBPlayerHUDWidget::HealthChanged(float Current, float Maximum)
 
 void UDBPlayerHUDWidget::ShowDeath()
 {
-	if (bShowingDeath) { return; }
+	if (bShowingDeath)
+	{
+		return;
+	}
 	bShowingDeath = true;
 	DeathPanel->SetVisibility(ESlateVisibility::Visible);
 	if (APlayerController* PC = GetOwningPlayer())
@@ -82,7 +91,10 @@ void UDBPlayerHUDWidget::ShowDeath()
 
 void UDBPlayerHUDWidget::ReleaseDeathInput()
 {
-	if (!bShowingDeath) { return; }
+	if (!bShowingDeath)
+	{
+		return;
+	}
 	bShowingDeath = false;
 	if (APlayerController* PC = GetOwningPlayer())
 	{
@@ -94,7 +106,10 @@ void UDBPlayerHUDWidget::ReleaseDeathInput()
 
 void UDBPlayerHUDWidget::Retry()
 {
-	if (bRetryRequested || !HealthSource.IsValid() || !HealthSource->IsDead()) { return; }
+	if (bRetryRequested || !HealthSource.IsValid() || !HealthSource->IsDead())
+	{
+		return;
+	}
 	bRetryRequested = true;
 	RetryButton->SetIsEnabled(false);
 	ReleaseDeathInput();
@@ -112,10 +127,14 @@ void UDBPlayerHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTi
 	Super::NativeTick(MyGeometry, InDeltaTime);
 	FVector2D Position;
 	if (!bShowingDeath && TargetingSource.IsValid() && TargetingSource->IsLockedOn()
-		&& UWidgetLayoutLibrary::ProjectWorldLocationToWidgetPosition(GetOwningPlayer(), TargetingSource->GetTargetPoint(), Position, true))
+	    && UWidgetLayoutLibrary::ProjectWorldLocationToWidgetPosition(
+	        GetOwningPlayer(), TargetingSource->GetTargetPoint(), Position, true))
 	{
 		CastChecked<UCanvasPanelSlot>(LockOnMarker->Slot)->SetPosition(Position);
 		LockOnMarker->SetVisibility(ESlateVisibility::HitTestInvisible);
 	}
-	else { LockOnMarker->SetVisibility(ESlateVisibility::Collapsed); }
+	else
+	{
+		LockOnMarker->SetVisibility(ESlateVisibility::Collapsed);
+	}
 }

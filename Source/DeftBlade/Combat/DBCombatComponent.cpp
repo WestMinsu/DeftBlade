@@ -30,30 +30,36 @@ DEFINE_LOG_CATEGORY_STATIC(LogDBCombat, Log, All);
 
 namespace
 {
-bool IsAttackInput(EDBActionInput Input)
-{
-	return Input == EDBActionInput::LightAttack || Input == EDBActionInput::HeavyAttack;
-}
-int32 InputPriority(EDBActionInput Input)
-{
-	return Input == EDBActionInput::Evade ? 3 : Input == EDBActionInput::Jump ? 2 : 1;
-}
+	bool IsAttackInput(EDBActionInput Input)
+	{
+		return Input == EDBActionInput::LightAttack || Input == EDBActionInput::HeavyAttack;
+	}
+	int32 InputPriority(EDBActionInput Input)
+	{
+		return Input == EDBActionInput::Evade ? 3 : Input == EDBActionInput::Jump ? 2 : 1;
+	}
 }
 
 bool FDBAttackDefinition::IsValid() const
 {
 	if (Id == EDBAttackId::None || !Montage || !FMath::IsFinite(PlayRate) || PlayRate <= 0.0f
-		|| !FMath::IsFinite(Damage) || Damage <= 0.0f || HitWindows.IsEmpty()
-		|| !FMath::IsFinite(ComboStart) || ComboStart >= Montage->GetPlayLength()
-		|| !FMath::IsFinite(EvadeCancelStart) || EvadeCancelStart < 0.0f || EvadeCancelStart >= Montage->GetPlayLength()
-		|| !FMath::IsFinite(JumpCancelStart) || JumpCancelStart >= Montage->GetPlayLength()
-		|| !FMath::IsFinite(MoveCancelStart) || MoveCancelStart >= Montage->GetPlayLength()) { return false; }
+	    || !FMath::IsFinite(Damage) || Damage <= 0.0f || HitWindows.IsEmpty() || !FMath::IsFinite(ComboStart)
+	    || ComboStart >= Montage->GetPlayLength() || !FMath::IsFinite(EvadeCancelStart) || EvadeCancelStart < 0.0f
+	    || EvadeCancelStart >= Montage->GetPlayLength() || !FMath::IsFinite(JumpCancelStart)
+	    || JumpCancelStart >= Montage->GetPlayLength() || !FMath::IsFinite(MoveCancelStart)
+	    || MoveCancelStart >= Montage->GetPlayLength())
+	{
+		return false;
+	}
 	float PreviousEnd = 0.0f;
 	for (const FDBAttackWindow& Window : HitWindows)
 	{
-		if (!FMath::IsFinite(Window.Start) || !FMath::IsFinite(Window.End)
-			|| Window.Start < PreviousEnd || Window.End <= Window.Start || Window.End > ComboStart
-			|| Window.End > JumpCancelStart || Window.End > MoveCancelStart) { return false; }
+		if (!FMath::IsFinite(Window.Start) || !FMath::IsFinite(Window.End) || Window.Start < PreviousEnd
+		    || Window.End <= Window.Start || Window.End > ComboStart || Window.End > JumpCancelStart
+		    || Window.End > MoveCancelStart)
+		{
+			return false;
+		}
 		PreviousEnd = Window.End;
 	}
 	return true;
@@ -72,14 +78,17 @@ void UDBCombatComponent::BeginPlay()
 	FCoreDelegates::ApplicationWillDeactivateDelegate.AddUObject(this, &ThisClass::ResetCombat);
 	USkeletalMeshComponent* Mesh = CastChecked<ACharacter>(GetOwner())->GetMesh();
 	PoseFinalizedHandle = Mesh->RegisterOnBoneTransformsFinalizedDelegate(
-		FOnBoneTransformsFinalizedMultiCast::FDelegate::CreateUObject(this, &ThisClass::BonesFinalized));
+	    FOnBoneTransformsFinalizedMultiCast::FDelegate::CreateUObject(this, &ThisClass::BonesFinalized));
 }
 
 bool UDBCombatComponent::CanProcessInput() const
 {
 	const ACharacter* Character = Cast<ACharacter>(GetOwner());
 	const UDBHealthComponent* Health = GetOwner()->FindComponentByClass<UDBHealthComponent>();
-	if (Health && Health->IsDead()) { return false; }
+	if (Health && Health->IsDead())
+	{
+		return false;
+	}
 	AController* Controller = Character ? Character->GetController() : nullptr;
 	if (!Controller || GetWorld()->IsPaused() || Controller->IsMoveInputIgnored())
 	{
@@ -89,8 +98,8 @@ bool UDBCombatComponent::CanProcessInput() const
 	{
 		const ULocalPlayer* LocalPlayer = PlayerController->GetLocalPlayer();
 		UGameViewportClient* ViewportClient = LocalPlayer ? LocalPlayer->ViewportClient : nullptr;
-		if (ViewportClient && (ViewportClient->IgnoreInput()
-			|| (ViewportClient->Viewport && !ViewportClient->Viewport->HasFocus())))
+		if (ViewportClient
+		    && (ViewportClient->IgnoreInput() || (ViewportClient->Viewport && !ViewportClient->Viewport->HasFocus())))
 		{
 			return false;
 		}
@@ -115,28 +124,50 @@ void UDBCombatComponent::RequestJump()
 
 void UDBCombatComponent::QueueInput(EDBActionInput Input)
 {
-	if (!CanProcessInput()) { ResetCombat(); return; }
+	if (!CanProcessInput())
+	{
+		ResetCombat();
+		return;
+	}
 	const ACharacter* Character = CastChecked<ACharacter>(GetOwner());
-	if (IsAttackInput(Input) && (!Character->GetCharacterMovement()->IsMovingOnGround()
-		|| NextAttack(Input) == EDBAttackId::None)) { return; }
-	if (Input == EDBActionInput::Jump && (Character->JumpCurrentCount >= Character->JumpMaxCount
-		|| !Character->GetCharacterMovement()->CanAttemptJump())) { return; }
-	if (Input == EDBActionInput::Evade && Character->GetCharacterMovement()->IsFalling() && (bAirEvadeUsed || EvadeMotionId != 0))
+	if (IsAttackInput(Input)
+	    && (!Character->GetCharacterMovement()->IsMovingOnGround() || NextAttack(Input) == EDBAttackId::None))
+	{
+		return;
+	}
+	if (Input == EDBActionInput::Jump
+	    && (Character->JumpCurrentCount >= Character->JumpMaxCount
+	        || !Character->GetCharacterMovement()->CanAttemptJump()))
+	{
+		return;
+	}
+	if (Input == EDBActionInput::Evade && Character->GetCharacterMovement()->IsFalling()
+	    && (bAirEvadeUsed || EvadeMotionId != 0))
 	{
 		// A rejected air press must not replay automatically on landing.
 		bAirEvadeUsed = true;
 		return;
 	}
 	const double Now = GetWorld()->GetTimeSeconds();
-	if (BufferedAction.Id != 0 && (ActionState != EDBActionState::None || !BufferedAction.IsExpired(Now, InputBufferLifetime))
-		&& InputPriority(BufferedAction.Input) > InputPriority(Input)) { return; }
+	if (BufferedAction.Id != 0
+	    && (ActionState != EDBActionState::None || !BufferedAction.IsExpired(Now, InputBufferLifetime))
+	    && InputPriority(BufferedAction.Input) > InputPriority(Input))
+	{
+		return;
+	}
 	BufferedAction = {++NextRequestId, Now, Input};
 }
 
 EDBAttackId UDBCombatComponent::NextAttack(EDBActionInput Input) const
 {
-	if (!IsAttackInput(Input)) { return EDBAttackId::None; }
-	if (IsAttacking()) { return Input == EDBActionInput::HeavyAttack ? ActiveAttack.NextHeavy : ActiveAttack.NextLight; }
+	if (!IsAttackInput(Input))
+	{
+		return EDBAttackId::None;
+	}
+	if (IsAttacking())
+	{
+		return Input == EDBActionInput::HeavyAttack ? ActiveAttack.NextHeavy : ActiveAttack.NextLight;
+	}
 	return Input == EDBActionInput::HeavyAttack ? EDBAttackId::Heavy1 : EDBAttackId::Light1;
 }
 
@@ -145,8 +176,14 @@ const FDBAttackDefinition* UDBCombatComponent::FindAttack(EDBAttackId Id) const
 	const FDBAttackDefinition* Found = nullptr;
 	for (const FDBAttackDefinition& Definition : Attacks)
 	{
-		if (Definition.Id != Id) { continue; }
-		if (Found) { return nullptr; } // Ambiguous authoring must not select an arbitrary move.
+		if (Definition.Id != Id)
+		{
+			continue;
+		}
+		if (Found)
+		{
+			return nullptr;
+		} // Ambiguous authoring must not select an arbitrary move.
 		Found = &Definition;
 	}
 	return Found;
@@ -154,14 +191,22 @@ const FDBAttackDefinition* UDBCombatComponent::FindAttack(EDBAttackId Id) const
 
 bool UDBCombatComponent::CanJumpFromAction() const
 {
-	if (IsAttacking()) { return PreviousAttackPosition >= ActiveAttack.JumpCancelStart; }
-	return ActionState != EDBActionState::Evade || GetWorld()->GetTimeSeconds() >= ActionStartedAt + EvadeJumpCancelStart;
+	if (IsAttacking())
+	{
+		return PreviousAttackPosition >= ActiveAttack.JumpCancelStart;
+	}
+	return ActionState != EDBActionState::Evade
+	       || GetWorld()->GetTimeSeconds() >= ActionStartedAt + EvadeJumpCancelStart;
 }
 
 void UDBCombatComponent::TryStartJump()
 {
 	ACharacter* Character = CastChecked<ACharacter>(GetOwner());
-	if (!Character->CanJump()) { BufferedAction = {}; return; }
+	if (!Character->CanJump())
+	{
+		BufferedAction = {};
+		return;
+	}
 	// Stop the ground evade before CMC enters Falling, preserving the separate air-evade budget.
 	StopEvadeMovement(false);
 	FinishAction(ActiveActionId);
@@ -174,12 +219,15 @@ bool UDBCombatComponent::TryTransitionToSprint()
 {
 	const ACharacter* Character = CastChecked<ACharacter>(GetOwner());
 	const UCharacterMovementComponent* Movement = Character->GetCharacterMovement();
-	const bool bLeavingBackward = bBackwardEvade && FVector::DotProduct(
-		Character->GetPendingMovementInputVector().GetSafeNormal2D(), Character->GetActorForwardVector()) > 0.0;
-	const double HandoffTime = bLeavingBackward ? InvulnerabilityEnd : FMath::Max(SprintTransitionStart + HeldSlideTime, InvulnerabilityEnd);
+	const bool bLeavingBackward = bBackwardEvade
+	                              && FVector::DotProduct(Character->GetPendingMovementInputVector().GetSafeNormal2D(),
+	                                     Character->GetActorForwardVector())
+	                                     > 0.0;
+	const double HandoffTime =
+	    bLeavingBackward ? InvulnerabilityEnd : FMath::Max(SprintTransitionStart + HeldSlideTime, InvulnerabilityEnd);
 	if (!CanProcessInput() || !Movement->IsMovingOnGround() || ActionState != EDBActionState::Evade
-		|| EvadeMotionId == 0 || BufferedAction.Id != 0 || GetWorld()->GetTimeSeconds() >= MovementEndsAt
-		|| GetWorld()->GetTimeSeconds() < ActionStartedAt + HandoffTime)
+	    || EvadeMotionId == 0 || BufferedAction.Id != 0 || GetWorld()->GetTimeSeconds() >= MovementEndsAt
+	    || GetWorld()->GetTimeSeconds() < ActionStartedAt + HandoffTime)
 	{
 		return false;
 	}
@@ -201,7 +249,8 @@ bool UDBCombatComponent::TryTransitionToSprint()
 	return true;
 }
 
-void UDBCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UDBCombatComponent::TickComponent(
+    float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 	if (!CanProcessInput())
@@ -222,27 +271,41 @@ void UDBCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		UE_LOG(LogDBCombat, Verbose, TEXT("%s expired #%llu at %.3f"), *GetOwner()->GetName(), BufferedAction.Id, Now);
 		BufferedAction = {};
 	}
-	const bool bEvadeExit = ActionState == EDBActionState::Evade &&
-		((BufferedAction.Input == EDBActionInput::Evade && Now >= ChainStartsAt)
-		|| (IsAttackInput(BufferedAction.Input) && Now >= ActionStartedAt + FMath::Max(EvadeAttackCancelStart, InvulnerabilityEnd))
-		|| (BufferedAction.Input == EDBActionInput::Jump && CanJumpFromAction()));
-	const bool bAttackExit = IsAttacking() &&
-		((BufferedAction.Input == EDBActionInput::Evade && PreviousAttackPosition >= ActiveAttack.EvadeCancelStart)
-		|| (BufferedAction.Input == EDBActionInput::Jump && CanJumpFromAction()));
+	const bool bEvadeExit = ActionState == EDBActionState::Evade
+	                        && ((BufferedAction.Input == EDBActionInput::Evade && Now >= ChainStartsAt)
+	                            || (IsAttackInput(BufferedAction.Input)
+	                                && Now >= ActionStartedAt + FMath::Max(EvadeAttackCancelStart, InvulnerabilityEnd))
+	                            || (BufferedAction.Input == EDBActionInput::Jump && CanJumpFromAction()));
+	const bool bAttackExit =
+	    IsAttacking()
+	    && ((BufferedAction.Input == EDBActionInput::Evade && PreviousAttackPosition >= ActiveAttack.EvadeCancelStart)
+	        || (BufferedAction.Input == EDBActionInput::Jump && CanJumpFromAction()));
 	if (BufferedAction.Id != 0 && (bEvadeExit || bAttackExit || ActionState == EDBActionState::None))
 	{
-		if (BufferedAction.Input == EDBActionInput::Evade) { TryStartEvade(Now); }
-		else if (BufferedAction.Input == EDBActionInput::Jump) { TryStartJump(); }
-		else { TryStartAttack(); }
+		if (BufferedAction.Input == EDBActionInput::Evade)
+		{
+			TryStartEvade(Now);
+		}
+		else if (BufferedAction.Input == EDBActionInput::Jump)
+		{
+			TryStartJump();
+		}
+		else
+		{
+			TryStartAttack();
+		}
 	}
 	if (IsAttacking())
 	{
 		ACharacter* Character = CastChecked<ACharacter>(GetOwner());
 		UAnimInstance* Anim = Character->GetMesh()->GetAnimInstance();
 		FAnimMontageInstance* Instance = Anim ? Anim->GetMontageInstanceForID(AttackMontageInstanceId) : nullptr;
-		if (!Character->GetCharacterMovement()->IsMovingOnGround() || (!Instance && !bAttackEndedPending)) { FinishAction(ActiveActionId); }
+		if (!Character->GetCharacterMovement()->IsMovingOnGround() || (!Instance && !bAttackEndedPending))
+		{
+			FinishAction(ActiveActionId);
+		}
 		else if (BufferedAction.Id == 0 && PreviousAttackPosition >= ActiveAttack.MoveCancelStart
-			&& !Character->GetPendingMovementInputVector().IsNearlyZero())
+		         && !Character->GetPendingMovementInputVector().IsNearlyZero())
 		{
 			// Keep this frame's movement intent for CMC instead of consuming it during recovery.
 			FinishAction(ActiveActionId);
@@ -272,7 +335,8 @@ void UDBCombatComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 			// Finish the authored motion, then blend to locomotion.
 			StopEvadeMontage();
 		}
-		if (!IsEvadeMontageActive() || !CastChecked<ACharacter>(GetOwner())->GetPendingMovementInputVector().IsNearlyZero())
+		if (!IsEvadeMontageActive()
+		    || !CastChecked<ACharacter>(GetOwner())->GetPendingMovementInputVector().IsNearlyZero())
 		{
 			FinishAction(ActiveActionId, false);
 		}
@@ -288,24 +352,26 @@ void UDBCombatComponent::UpdateEvadeMovement(float DeltaTime)
 {
 	ACharacter* Character = CastChecked<ACharacter>(GetOwner());
 	UCharacterMovementComponent* Movement = Character->GetCharacterMovement();
-	const TSharedPtr<FRootMotionSource_ConstantForce> Motion = StaticCastSharedPtr<FRootMotionSource_ConstantForce>(
-		Movement->GetRootMotionSourceByID(EvadeMotionId));
+	const TSharedPtr<FRootMotionSource_ConstantForce> Motion =
+	    StaticCastSharedPtr<FRootMotionSource_ConstantForce>(Movement->GetRootMotionSourceByID(EvadeMotionId));
 	if (!Motion)
 	{
 		return;
 	}
 
 	const FVector Direction = Character->GetPendingMovementInputVector().GetSafeNormal2D();
-	if (!Direction.IsNearlyZero() && (!bBackwardEvade || FVector::DotProduct(Direction, Character->GetActorForwardVector()) <= 0.0))
+	if (!Direction.IsNearlyZero()
+	    && (!bBackwardEvade || FVector::DotProduct(Direction, Character->GetActorForwardVector()) <= 0.0))
 	{
 		EvadeDirection = Direction;
 	}
 
 	// Stretch only the glide, preserving push-off, recovery and the wall-clock i-frame interval.
 	const double PoseTime = GetWorld()->GetTimeSeconds() - ActionStartedAt - HeldSlideTime;
-	const double ExtraTime = bEvadeHeld && !Direction.IsNearlyZero() && BufferedAction.Id == 0
-		&& PoseTime >= 0.18 && PoseTime < SprintTransitionStart
-		? FMath::Min(DeltaTime * 0.5, FMath::Max(0.0, MaxHeldSlideTime - HeldSlideTime)) : 0.0;
+	const double ExtraTime = bEvadeHeld && !Direction.IsNearlyZero() && BufferedAction.Id == 0 && PoseTime >= 0.18
+	                                 && PoseTime < SprintTransitionStart
+	                             ? FMath::Min(DeltaTime * 0.5, FMath::Max(0.0, MaxHeldSlideTime - HeldSlideTime))
+	                             : 0.0;
 	if (ExtraTime > 0.0)
 	{
 		// CMC still performs collision/gravity; slowing this finite source also slows its speed curve.
@@ -315,7 +381,9 @@ void UDBCombatComponent::UpdateEvadeMovement(float DeltaTime)
 		ChainStartsAt += ExtraTime;
 	}
 	UCurveFloat* Curve = bBackwardEvade && BackwardEvadeStrengthCurve ? BackwardEvadeStrengthCurve : EvadeStrengthCurve;
-	float Speed = EvadeSpeed * (Curve ? Curve->GetFloatValue(FMath::Clamp(Motion->GetTime() / Motion->Duration, 0.0f, 1.0f)) : 1.0f);
+	float Speed =
+	    EvadeSpeed
+	    * (Curve ? Curve->GetFloatValue(FMath::Clamp(Motion->GetTime() / Motion->Duration, 0.0f, 1.0f)) : 1.0f);
 	const bool bHeldForward = bEvadeHeld && !bBackwardEvade && !Direction.IsNearlyZero() && BufferedAction.Id == 0;
 	if (bHeldForward && PoseTime >= 0.18)
 	{
@@ -361,19 +429,19 @@ void UDBCombatComponent::TryStartEvade(double Now)
 	}
 	FVector Direction = Character->GetPendingMovementInputVector().GetSafeNormal2D();
 	const auto* Targeting = Character->FindComponentByClass<UDBTargetingComponent>();
-	const bool bStartBackward = Direction.IsNearlyZero() || (Targeting && Targeting->IsLockedOn()
-		&& FVector::DotProduct(Direction, Character->GetActorForwardVector()) < -0.5);
+	const bool bStartBackward = Direction.IsNearlyZero()
+	                            || (Targeting && Targeting->IsLockedOn()
+	                                && FVector::DotProduct(Direction, Character->GetActorForwardVector()) < -0.5);
 	if (Direction.IsNearlyZero())
 	{
 		Direction = -Character->GetActorForwardVector().GetSafeNormal2D();
 	}
 	const double Duration = bStartBackward ? BackwardEvadeDuration : EvadeDuration;
 	const double ChainStart = bStartBackward ? BackwardEvadeChainStart : EvadeChainStart;
-	if (!FMath::IsFinite(Duration) || Duration <= 0.0 || Duration > MAX_flt
-		|| !FMath::IsFinite(EvadeSpeed) || EvadeSpeed <= 0.0f
-		|| !FMath::IsFinite(InvulnerabilityStart) || !FMath::IsFinite(InvulnerabilityEnd)
-		|| InvulnerabilityStart < 0.0 || InvulnerabilityEnd <= InvulnerabilityStart
-		|| !FMath::IsFinite(ChainStart) || InvulnerabilityEnd >= ChainStart || ChainStart >= Duration)
+	if (!FMath::IsFinite(Duration) || Duration <= 0.0 || Duration > MAX_flt || !FMath::IsFinite(EvadeSpeed)
+	    || EvadeSpeed <= 0.0f || !FMath::IsFinite(InvulnerabilityStart) || !FMath::IsFinite(InvulnerabilityEnd)
+	    || InvulnerabilityStart < 0.0 || InvulnerabilityEnd <= InvulnerabilityStart || !FMath::IsFinite(ChainStart)
+	    || InvulnerabilityEnd >= ChainStart || ChainStart >= Duration)
 	{
 		return;
 	}
@@ -419,8 +487,8 @@ void UDBCombatComponent::TryStartEvade(double Now)
 		// The default stops this montage group with BlendIn, so old cycles fade out instead of accumulating.
 		AnimInstance->Montage_Play(Montage, 1.0f, EMontagePlayReturnType::MontageLength);
 	}
-	UE_LOG(LogDBCombat, Log, TEXT("%s started Evade #%llu at %.3f, movement ends %.3f"),
-		*GetOwner()->GetName(), ActiveActionId, Now, MovementEndsAt);
+	UE_LOG(LogDBCombat, Log, TEXT("%s started Evade #%llu at %.3f, movement ends %.3f"), *GetOwner()->GetName(),
+	    ActiveActionId, Now, MovementEndsAt);
 }
 
 bool UDBCombatComponent::IsInvulnerable() const
@@ -439,8 +507,8 @@ bool UDBCombatComponent::FinishAction(uint64 ExpectedActionId, bool bInterrupted
 	{
 		return false;
 	}
-	UE_LOG(LogDBCombat, Log, TEXT("%s finished action #%llu at %.3f"),
-		*GetOwner()->GetName(), ActiveActionId, GetWorld()->GetTimeSeconds());
+	UE_LOG(LogDBCombat, Log, TEXT("%s finished action #%llu at %.3f"), *GetOwner()->GetName(), ActiveActionId,
+	    GetWorld()->GetTimeSeconds());
 	StopEvadeMovement();
 	StopAttackMontage();
 	if (bInterrupted)
@@ -464,8 +532,8 @@ void UDBCombatComponent::TryStartAttack()
 	const FDBAttackDefinition* Definition = FindAttack(NextAttack(BufferedAction.Input));
 	const bool bContinuing = ActionState != EDBActionState::None;
 	UAnimInstance* Anim = Character->GetMesh()->GetAnimInstance();
-	if (!Character->GetCharacterMovement()->IsMovingOnGround() || !Anim || !Definition
-		|| !Definition->IsValid() || !ConfigureBlade())
+	if (!Character->GetCharacterMovement()->IsMovingOnGround() || !Anim || !Definition || !Definition->IsValid()
+	    || !ConfigureBlade())
 	{
 		BufferedAction = {};
 		return;
@@ -478,7 +546,10 @@ void UDBCombatComponent::TryStartAttack()
 	if (Anim->Montage_Play(Definition->Montage, Definition->PlayRate) <= 0.0f)
 	{
 		BufferedAction = {};
-		if (bContinuing) { FinishAction(ActiveActionId); }
+		if (bContinuing)
+		{
+			FinishAction(ActiveActionId);
+		}
 		return;
 	}
 	FAnimMontageInstance* Instance = Anim->GetActiveInstanceForMontage(Definition->Montage);
@@ -490,10 +561,14 @@ void UDBCombatComponent::TryStartAttack()
 	HitActors.Reset();
 	bAttackEndedPending = false;
 	ActiveActionId = BufferedAction.Id;
-	ActionState = BufferedAction.Input == EDBActionInput::HeavyAttack ? EDBActionState::HeavyAttack : EDBActionState::LightAttack;
+	ActionState =
+	    BufferedAction.Input == EDBActionInput::HeavyAttack ? EDBActionState::HeavyAttack : EDBActionState::LightAttack;
 	BufferedAction = {};
 	Character->StopJumping();
-	if (!bContinuing) { Character->GetCharacterMovement()->StopMovementImmediately(); }
+	if (!bContinuing)
+	{
+		Character->GetCharacterMovement()->StopMovementImmediately();
+	}
 	Instance->OnMontageBlendingOutStarted.BindUObject(this, &ThisClass::AttackBlendingOut, ActiveActionId);
 	Instance->OnMontageEnded.BindUObject(this, &ThisClass::AttackEnded, ActiveActionId);
 	OnAttackStarted.Broadcast();
@@ -511,38 +586,66 @@ void UDBCombatComponent::SampleAttackWindow(float Position)
 		if (Window.Overlaps(Previous, Position))
 		{
 			OnAttackWindowTraversed.Broadcast(FMath::Max(Previous, Window.Start), FMath::Min(Position, Window.End));
-			if (ActionId != ActiveActionId) { return; }
+			if (ActionId != ActiveActionId)
+			{
+				return;
+			}
 		}
 	}
 }
 
 bool UDBCombatComponent::IsAttackWindowOpen() const
 {
-	if (!IsAttacking()) { return false; }
+	if (!IsAttacking())
+	{
+		return false;
+	}
 	for (const FDBAttackWindow& Window : ActiveAttack.HitWindows)
 	{
-		if (PreviousAttackPosition >= Window.Start && PreviousAttackPosition < Window.End) { return true; }
+		if (PreviousAttackPosition >= Window.Start && PreviousAttackPosition < Window.End)
+		{
+			return true;
+		}
 	}
 	return false;
 }
 
 void UDBCombatComponent::AttackBlendingOut(UAnimMontage* Montage, bool bInterrupted, uint64 ActionId)
 {
-	if (ActionId != ActiveActionId || !IsAttacking()) { return; }
-	if (bInterrupted) { FinishAction(ActionId); return; }
+	if (ActionId != ActiveActionId || !IsAttacking())
+	{
+		return;
+	}
+	if (bInterrupted)
+	{
+		FinishAction(ActionId);
+		return;
+	}
 	// Natural blend-out still has an instance. BonesFinalized samples its fresh pose.
 }
 
 void UDBCombatComponent::AttackEnded(UAnimMontage* Montage, bool bInterrupted, uint64 ActionId)
 {
-	if (ActionId != ActiveActionId || !IsAttacking()) { return; }
-	if (bInterrupted) { FinishAction(ActionId); }
-	else { bAttackEndedPending = true; } // Flush the final interval after this frame's bone evaluation.
+	if (ActionId != ActiveActionId || !IsAttacking())
+	{
+		return;
+	}
+	if (bInterrupted)
+	{
+		FinishAction(ActionId);
+	}
+	else
+	{
+		bAttackEndedPending = true;
+	} // Flush the final interval after this frame's bone evaluation.
 }
 
 void UDBCombatComponent::StopAttackMontage()
 {
-	if (AttackMontageInstanceId == INDEX_NONE) { return; }
+	if (AttackMontageInstanceId == INDEX_NONE)
+	{
+		return;
+	}
 	UAnimInstance* Anim = CastChecked<ACharacter>(GetOwner())->GetMesh()->GetAnimInstance();
 	FAnimMontageInstance* Instance = Anim ? Anim->GetMontageInstanceForID(AttackMontageInstanceId) : nullptr;
 	AttackMontageInstanceId = INDEX_NONE;
@@ -557,7 +660,10 @@ void UDBCombatComponent::StopAttackMontage()
 		Instance->OnMontageEnded.Unbind();
 		// An interrupted pose may fade, but its attack displacement must stop now.
 		Instance->PushDisableRootMotion();
-		if (Instance->IsPlaying()) { Instance->Stop(FAlphaBlend(0.10f), true); }
+		if (Instance->IsPlaying())
+		{
+			Instance->Stop(FAlphaBlend(0.10f), true);
+		}
 	}
 }
 
@@ -568,7 +674,9 @@ bool UDBCombatComponent::ConfigureBlade()
 	const UStaticMeshSocket* Tip = Mesh ? Mesh->FindSocket(TEXT("BladeTip")) : nullptr;
 	if (!Base || !Tip || !FMath::IsFinite(BladeTraceRadius) || BladeTraceRadius < 0.5f)
 	{
-		UE_LOG(LogDBCombat, Warning, TEXT("Assign a weapon with BladeBase/BladeTip sockets and a valid trace radius on %s."), *GetOwner()->GetName());
+		UE_LOG(LogDBCombat, Warning,
+		    TEXT("Assign a weapon with BladeBase/BladeTip sockets and a valid trace radius on %s."),
+		    *GetOwner()->GetName());
 		return false;
 	}
 	BladeBaseLocal = Base->RelativeLocation;
@@ -583,21 +691,30 @@ FTransform UDBCombatComponent::GetWeaponTransform() const
 	return WeaponMesh->GetRelativeTransform() * Mesh->GetSocketTransform(WeaponMesh->GetAttachSocketName());
 }
 
-FTransform UDBCombatComponent::SampleWeaponTransform(float Position, float CurrentPosition,
-	const FTransform& CurrentMesh, const FTransform& CurrentWeapon) const
+FTransform UDBCombatComponent::SampleWeaponTransform(
+    float Position, float CurrentPosition, const FTransform& CurrentMesh, const FTransform& CurrentWeapon) const
 {
-	if (FMath::IsNearlyEqual(Position, PreviousAttackPosition)) { return PreviousWeaponTransform; }
-	if (FMath::IsNearlyEqual(Position, CurrentPosition) && !bAttackEndedPending) { return CurrentWeapon; }
+	if (FMath::IsNearlyEqual(Position, PreviousAttackPosition))
+	{
+		return PreviousWeaponTransform;
+	}
+	if (FMath::IsNearlyEqual(Position, CurrentPosition) && !bAttackEndedPending)
+	{
+		return CurrentWeapon;
+	}
 
 	// A hitch may cross the entire hit window. Recover the authored poses inside
 	// that interval instead of tracing the later recovery pose or a single chord.
 	USkeletalMeshComponent* Mesh = CastChecked<ACharacter>(GetOwner())->GetMesh();
 	const FBoneContainer& Bones = Mesh->GetAnimInstance()->GetRequiredBones();
 	const USkeletalMeshSocket* Socket = Mesh->GetSocketByName(WeaponMesh->GetAttachSocketName());
-	const FCompactPoseBoneIndex Bone = Bones.MakeCompactPoseIndex(FMeshPoseBoneIndex(
-		Mesh->GetBoneIndex(Socket ? Socket->BoneName : WeaponMesh->GetAttachSocketName())));
+	const FCompactPoseBoneIndex Bone = Bones.MakeCompactPoseIndex(
+	    FMeshPoseBoneIndex(Mesh->GetBoneIndex(Socket ? Socket->BoneName : WeaponMesh->GetAttachSocketName())));
 	const FAnimTrack* Track = ActiveAttack.Montage->GetAnimationData(TEXT("DefaultSlot"));
-	if (!Track || Bone == INDEX_NONE) { return CurrentWeapon; }
+	if (!Track || Bone == INDEX_NONE)
+	{
+		return CurrentWeapon;
+	}
 
 	FMemMark Mark(FMemStack::Get());
 	FCompactPose Pose;
@@ -611,46 +728,74 @@ FTransform UDBCombatComponent::SampleWeaponTransform(float Position, float Curre
 	FCSPose<FCompactPose> ComponentPose;
 	ComponentPose.InitPose(Pose);
 	FTransform MeshAtTime;
-	const float Alpha = FMath::Clamp((Position - PreviousAttackPosition) / (CurrentPosition - PreviousAttackPosition), 0.0f, 1.0f);
+	const float Alpha =
+	    FMath::Clamp((Position - PreviousAttackPosition) / (CurrentPosition - PreviousAttackPosition), 0.0f, 1.0f);
 	MeshAtTime.Blend(PreviousMeshTransform, CurrentMesh, Alpha);
 	const FTransform SocketLocal = Socket ? Socket->GetSocketLocalTransform() : FTransform::Identity;
-	return WeaponMesh->GetRelativeTransform() * SocketLocal * ComponentPose.GetComponentSpaceTransform(Bone) * MeshAtTime;
+	return WeaponMesh->GetRelativeTransform() * SocketLocal * ComponentPose.GetComponentSpaceTransform(Bone)
+	       * MeshAtTime;
 }
 
 void UDBCombatComponent::BonesFinalized()
 {
-	if (!IsAttacking() || !CanProcessInput()) { return; }
+	if (!IsAttacking() || !CanProcessInput())
+	{
+		return;
+	}
 	ACharacter* Character = CastChecked<ACharacter>(GetOwner());
 	UAnimInstance* Anim = Character->GetMesh()->GetAnimInstance();
 	const FAnimMontageInstance* Instance = Anim ? Anim->GetMontageInstanceForID(AttackMontageInstanceId) : nullptr;
-	if (!Instance && !bAttackEndedPending) { return; }
+	if (!Instance && !bAttackEndedPending)
+	{
+		return;
+	}
 	const uint64 ActionId = ActiveActionId;
 	const float Position = bAttackEndedPending ? ActiveAttack.Montage->GetPlayLength() : Instance->GetPosition();
 	const FTransform CurrentMesh = Character->GetMesh()->GetComponentTransform();
 	const FTransform CurrentWeapon = GetWeaponTransform();
 	TraceAttack(PreviousAttackPosition, Position, CurrentMesh, CurrentWeapon);
-	if (ActionId != ActiveActionId) { return; } // Damage callbacks may interrupt or kill the attacker.
+	if (ActionId != ActiveActionId)
+	{
+		return;
+	} // Damage callbacks may interrupt or kill the attacker.
 	SampleAttackWindow(Position);
-	if (ActionId != ActiveActionId) { return; }
+	if (ActionId != ActiveActionId)
+	{
+		return;
+	}
 	PreviousMeshTransform = CurrentMesh;
 	PreviousWeaponTransform = CurrentWeapon;
 	// Flush this frame's contacts before changing the montage or resetting its per-swing hit set.
 	if (BufferedAction.Id != 0 && IsAttackInput(BufferedAction.Input) && Position >= ActiveAttack.ComboStart)
 	{
 		TryStartAttack();
-		if (ActionId != ActiveActionId) { return; }
+		if (ActionId != ActiveActionId)
+		{
+			return;
+		}
 	}
-	if (bAttackEndedPending) { FinishAction(ActionId, false); }
+	if (bAttackEndedPending)
+	{
+		FinishAction(ActionId, false);
+	}
 }
 
-void UDBCombatComponent::TraceAttack(float Previous, float Current, const FTransform& CurrentMesh, const FTransform& CurrentWeapon)
+void UDBCombatComponent::TraceAttack(
+    float Previous, float Current, const FTransform& CurrentMesh, const FTransform& CurrentWeapon)
 {
 	const uint64 ActionId = ActiveActionId;
 	for (int32 Index = 0; Index < ActiveAttack.HitWindows.Num() && ActiveActionId == ActionId; ++Index)
 	{
 		const FDBAttackWindow Window = ActiveAttack.HitWindows[Index];
-		if (!Window.Overlaps(Previous, Current)) { continue; }
-		if (ActiveHitWindow != Index) { HitActors.Reset(); ActiveHitWindow = Index; }
+		if (!Window.Overlaps(Previous, Current))
+		{
+			continue;
+		}
+		if (ActiveHitWindow != Index)
+		{
+			HitActors.Reset();
+			ActiveHitWindow = Index;
+		}
 		const float From = FMath::Max(Previous, Window.Start);
 		const float To = FMath::Min(Current, Window.End);
 		const int32 Steps = FMath::Clamp(FMath::CeilToInt((To - From) * 120.0f), 1, 32);
@@ -668,7 +813,7 @@ void UDBCombatComponent::TraceAttack(float Previous, float Current, const FTrans
 void UDBCombatComponent::SweepBlade(const FTransform& From, const FTransform& To, uint64 ActionId)
 {
 	const double Length = FMath::Max(From.TransformVector(BladeTipLocal - BladeBaseLocal).Size(),
-		To.TransformVector(BladeTipLocal - BladeBaseLocal).Size());
+	    To.TransformVector(BladeTipLocal - BladeBaseLocal).Size());
 	const int32 Samples = FMath::Clamp(FMath::CeilToInt(Length / (BladeTraceRadius * 2.0f)), 1, 64);
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(DBBlade), false, GetOwner());
 	TArray<FHitResult> Hits;
@@ -677,26 +822,41 @@ void UDBCombatComponent::SweepBlade(const FTransform& From, const FTransform& To
 		const FVector Local = FMath::Lerp(BladeBaseLocal, BladeTipLocal, static_cast<float>(Sample) / Samples);
 		Hits.Reset();
 		GetWorld()->SweepMultiByChannel(Hits, From.TransformPosition(Local), To.TransformPosition(Local),
-			FQuat::Identity, DBCollision::Melee, FCollisionShape::MakeSphere(BladeTraceRadius), Params);
+		    FQuat::Identity, DBCollision::Melee, FCollisionShape::MakeSphere(BladeTraceRadius), Params);
 		for (const FHitResult& Hit : Hits)
 		{
 			AActor* Target = Hit.GetActor();
-			if (ActiveActionId != ActionId) { return; }
-			if (!IsValid(Target) || HitActors.Contains(Target)) { continue; }
+			if (ActiveActionId != ActionId)
+			{
+				return;
+			}
+			if (!IsValid(Target) || HitActors.Contains(Target))
+			{
+				continue;
+			}
 			const auto* Team = Cast<IGenericTeamAgentInterface>(CastChecked<ACharacter>(GetOwner())->GetController());
-			if (Team && Team->GetTeamAttitudeTowards(*Target) != ETeamAttitude::Hostile) { continue; }
+			if (Team && Team->GetTeamAttitudeTowards(*Target) != ETeamAttitude::Hostile)
+			{
+				continue;
+			}
 			const UDBHealthComponent* Health = Target->FindComponentByClass<UDBHealthComponent>();
-			if (!Health || Health->IsDead()) { continue; }
+			if (!Health || Health->IsDead())
+			{
+				continue;
+			}
 			FCollisionQueryParams Sight = Params;
 			Sight.AddIgnoredActor(Target);
 			FHitResult Obstruction;
-			if (GetWorld()->LineTraceSingleByChannel(Obstruction, GetOwner()->GetActorLocation(), Hit.ImpactPoint,
-				DBCollision::Melee, Sight)) { continue; }
+			if (GetWorld()->LineTraceSingleByChannel(
+			        Obstruction, GetOwner()->GetActorLocation(), Hit.ImpactPoint, DBCollision::Melee, Sight))
+			{
+				continue;
+			}
 			// One contact attempt per actor/window, even when that target rejects it via i-frames.
 			HitActors.Add(Target);
 			UGameplayStatics::ApplyPointDamage(Target, ActiveAttack.Damage,
-				(To.TransformPosition(Local) - From.TransformPosition(Local)).GetSafeNormal(), Hit,
-				CastChecked<ACharacter>(GetOwner())->GetController(), GetOwner(), nullptr);
+			    (To.TransformPosition(Local) - From.TransformPosition(Local)).GetSafeNormal(), Hit,
+			    CastChecked<ACharacter>(GetOwner())->GetController(), GetOwner(), nullptr);
 		}
 	}
 }
@@ -707,7 +867,7 @@ bool UDBCombatComponent::IsEvadeMontageActive() const
 	{
 		// Active-map queries become false as blend-out begins; the pose still contributes then.
 		return (EvadeMontage && AnimInstance->GetInstanceForMontage(EvadeMontage))
-			|| (BackwardEvadeMontage && AnimInstance->GetInstanceForMontage(BackwardEvadeMontage));
+		       || (BackwardEvadeMontage && AnimInstance->GetInstanceForMontage(BackwardEvadeMontage));
 	}
 	return false;
 }
@@ -747,8 +907,8 @@ void UDBCombatComponent::ResetCombat()
 {
 	if (ActiveActionId != 0 || BufferedAction.Id != 0)
 	{
-		UE_LOG(LogDBCombat, Verbose, TEXT("%s reset active #%llu / pending #%llu"),
-			*GetOwner()->GetName(), ActiveActionId, BufferedAction.Id);
+		UE_LOG(LogDBCombat, Verbose, TEXT("%s reset active #%llu / pending #%llu"), *GetOwner()->GetName(),
+		    ActiveActionId, BufferedAction.Id);
 	}
 	FinishAction(ActiveActionId);
 	// Reset also stops any residual blend-out after an interruption.

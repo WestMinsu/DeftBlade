@@ -1,0 +1,48 @@
+# Project formatting based on Epic's C++ conventions; clang-format 19+.
+# Keep include order: Unreal's *.generated.h must remain the last header include.
+BasedOnStyle: Microsoft
+Language: Cpp
+Standard: c++20
+UseTab: ForIndentation
+IndentWidth: 4
+TabWidth: 4
+ContinuationIndentWidth: 4
+AccessModifierOffset: -4
+IndentCaseLabels: true
+NamespaceIndentation: All
+ColumnLimit: 120
+BreakBeforeBraces: Allman
+BreakBeforeBinaryOperators: NonAssignment
+AllowShortBlocksOnASingleLine: Never
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLambdasOnASingleLine: None
+AllowShortLoopsOnASingleLine: false
+AllowShortEnumsOnASingleLine: false
+PointerAlignment: Left
+ReferenceAlignment: Left
+DerivePointerAlignment: false
+AlignAfterOpenBracket: DontAlign
+SortIncludes: Never
+IncludeBlocks: Preserve
+SortUsingDeclarations: Never
+FixNamespaceComments: false
+ReflowComments: false
+BreakStringLiterals: false
+InsertBraces: false
+RemoveBracesLLVM: false
+LineEnding: LF
+InsertNewlineAtEOF: true
+MaxEmptyLinesToKeep: 1
+StatementMacros:
+  - GENERATED_BODY
+  - GENERATED_UCLASS_BODY
+  - GENERATED_USTRUCT_BODY
+  - GENERATED_IINTERFACE_BODY
+  - GENERATED_UINTERFACE_BODY
+  - UCLASS
+  - USTRUCT
+  - UENUM
+  - UINTERFACE
+  - UFUNCTION
+  - UPROPERTY

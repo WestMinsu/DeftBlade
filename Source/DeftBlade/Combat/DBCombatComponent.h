@@ -21,16 +21,27 @@ enum class EDBActionState : uint8
 UENUM()
 enum class EDBActionInput : uint8
 {
-	None, Evade, LightAttack, HeavyAttack, Jump
+	None,
+	Evade,
+	LightAttack,
+	HeavyAttack,
+	Jump
 };
 
 UENUM(BlueprintType)
 enum class EDBAttackId : uint8
 {
 	None,
-	Light1, Light2, Light3, Light4,
-	Heavy1, Heavy2, Heavy3, Heavy4,
-	Light1Heavy, Light2Heavy
+	Light1,
+	Light2,
+	Light3,
+	Light4,
+	Heavy1,
+	Heavy2,
+	Heavy3,
+	Heavy4,
+	Light1Heavy,
+	Light2Heavy
 };
 
 /** One deliberate press. Id == 0 means the slot is empty. */
@@ -94,7 +105,7 @@ struct FDBAttackDefinition
 
 	/** Separate swings in one motion may each damage the same target once. */
 	UPROPERTY(EditAnywhere)
-	TArray<FDBAttackWindow> HitWindows = { FDBAttackWindow() };
+	TArray<FDBAttackWindow> HitWindows = {FDBAttackWindow()};
 
 	/** Earliest next attack; always after this motion's last hit window. */
 	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"))
@@ -132,21 +143,46 @@ public:
 	void RequestAttack(bool bHeavy);
 	void RequestJump();
 	bool CanJumpFromAction() const;
-	void SetWeaponMesh(UStaticMeshComponent* InWeapon) { WeaponMesh = InWeapon; }
-	void SetEvadeHeld(bool bHeld, float SprintSpeed) { bEvadeHeld = bHeld; HeldGlideSpeed = SprintSpeed; }
+	void SetWeaponMesh(UStaticMeshComponent* InWeapon)
+	{
+		WeaponMesh = InWeapon;
+	}
+	void SetEvadeHeld(bool bHeld, float SprintSpeed)
+	{
+		bEvadeHeld = bHeld;
+		HeldGlideSpeed = SprintSpeed;
+	}
 	bool TryTransitionToSprint();
-	void ResetAirEvade() { bAirEvadeUsed = false; }
+	void ResetAirEvade()
+	{
+		bAirEvadeUsed = false;
+	}
 	bool FinishAction(uint64 ExpectedActionId, bool bInterrupted = true);
 	void ResetCombat();
 
 	UFUNCTION(BlueprintPure, Category = "Combat")
 	bool IsInvulnerable() const;
 
-	EDBActionState GetActionState() const { return ActionState; }
-	uint64 GetActiveActionId() const { return ActiveActionId; }
-	EDBAttackId GetAttackId() const { return IsAttacking() ? ActiveAttack.Id : EDBAttackId::None; }
-	const FDBBufferedAction& GetBufferedAction() const { return BufferedAction; }
-	bool IsAttacking() const { return ActionState == EDBActionState::LightAttack || ActionState == EDBActionState::HeavyAttack; }
+	EDBActionState GetActionState() const
+	{
+		return ActionState;
+	}
+	uint64 GetActiveActionId() const
+	{
+		return ActiveActionId;
+	}
+	EDBAttackId GetAttackId() const
+	{
+		return IsAttacking() ? ActiveAttack.Id : EDBAttackId::None;
+	}
+	const FDBBufferedAction& GetBufferedAction() const
+	{
+		return BufferedAction;
+	}
+	bool IsAttacking() const
+	{
+		return ActionState == EDBActionState::LightAttack || ActionState == EDBActionState::HeavyAttack;
+	}
 	bool IsAttackWindowOpen() const;
 	/** Swept montage-time interval; a long frame crossing the whole window still emits once. */
 	FDBAttackWindowTraversed OnAttackWindowTraversed;
@@ -156,7 +192,8 @@ public:
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
-	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+	virtual void TickComponent(
+	    float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	/** Idle expiry; active attacks/evades retain one compatible follow-up. */
 	UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0.01"))
@@ -245,7 +282,8 @@ private:
 	void BonesFinalized();
 	bool ConfigureBlade();
 	FTransform GetWeaponTransform() const;
-	FTransform SampleWeaponTransform(float Position, float CurrentPosition, const FTransform& CurrentMesh, const FTransform& CurrentWeapon) const;
+	FTransform SampleWeaponTransform(
+	    float Position, float CurrentPosition, const FTransform& CurrentMesh, const FTransform& CurrentWeapon) const;
 	void TraceAttack(float Previous, float Current, const FTransform& CurrentMesh, const FTransform& CurrentWeapon);
 	void SweepBlade(const FTransform& From, const FTransform& To, uint64 ActionId);
 	void UpdateEvadeMovement(float DeltaTime);

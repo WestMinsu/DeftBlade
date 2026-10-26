@@ -49,7 +49,7 @@ ADBPlayerCharacter::ADBPlayerCharacter()
 	CameraBoom->TargetArmLength = 350.0f;
 	CameraBoom->SetRelativeRotation(FRotator(-30.f, 0.f, 0.f));
 	CameraBoom->bUsePawnControlRotation = true;
-	
+
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
 	FollowCamera->bUsePawnControlRotation = false;
@@ -81,8 +81,10 @@ void ADBPlayerCharacter::AssistAttackFacing()
 	FVector Direction = GetActorForwardVector();
 	if (Input)
 	{
-		const FVector2D Keyboard = MoveAction ? Input->GetActionValue(MoveAction).Get<FVector2D>() : FVector2D::ZeroVector;
-		const FVector2D Gamepad = GamepadMoveAction ? Input->GetActionValue(GamepadMoveAction).Get<FVector2D>() : FVector2D::ZeroVector;
+		const FVector2D Keyboard =
+		    MoveAction ? Input->GetActionValue(MoveAction).Get<FVector2D>() : FVector2D::ZeroVector;
+		const FVector2D Gamepad =
+		    GamepadMoveAction ? Input->GetActionValue(GamepadMoveAction).Get<FVector2D>() : FVector2D::ZeroVector;
 		const FVector2D Axes = Keyboard + Gamepad.GetSafeNormal();
 		if (!Axes.IsNearlyZero())
 		{
@@ -94,10 +96,14 @@ void ADBPlayerCharacter::AssistAttackFacing()
 	TargetingComponent->AssistAttackFacing(Direction);
 }
 
-float ADBPlayerCharacter::TakeDamage(float Amount, const FDamageEvent& Event, AController* EventInstigator, AActor* Causer)
+float ADBPlayerCharacter::TakeDamage(
+    float Amount, const FDamageEvent& Event, AController* EventInstigator, AActor* Causer)
 {
 	const float Applied = HealthComponent->ApplyDamage(Amount);
-	if (Applied > 0.0f) { Super::TakeDamage(Applied, Event, EventInstigator, Causer); }
+	if (Applied > 0.0f)
+	{
+		Super::TakeDamage(Applied, Event, EventInstigator, Causer);
+	}
 	return Applied;
 }
 
@@ -119,7 +125,8 @@ bool ADBPlayerCharacter::CanJumpWhileFalling() const
 
 bool ADBPlayerCharacter::CanJumpInternal_Implementation() const
 {
-	return !HealthComponent->IsDead() && CombatComponent->CanJumpFromAction() && Super::CanJumpInternal_Implementation();
+	return !HealthComponent->IsDead() && CombatComponent->CanJumpFromAction()
+	       && Super::CanJumpInternal_Implementation();
 }
 
 void ADBPlayerCharacter::OnJumped_Implementation()
@@ -133,10 +140,12 @@ void ADBPlayerCharacter::OnJumped_Implementation()
 	}
 
 	const APlayerController* PlayerController = Cast<APlayerController>(Controller);
-	const UEnhancedPlayerInput* Input = PlayerController ? Cast<UEnhancedPlayerInput>(PlayerController->PlayerInput) : nullptr;
+	const UEnhancedPlayerInput* Input =
+	    PlayerController ? Cast<UEnhancedPlayerInput>(PlayerController->PlayerInput) : nullptr;
 	// Read current actions: velocity can persist after release, and evade consumes movement intent before CMC.
-	const bool bHasDirectionInput = Input && ((MoveAction && Input->GetActionValue(MoveAction).IsNonZero())
-		|| (GamepadMoveAction && Input->GetActionValue(GamepadMoveAction).IsNonZero()));
+	const bool bHasDirectionInput = Input
+	                                && ((MoveAction && Input->GetActionValue(MoveAction).IsNonZero())
+	                                    || (GamepadMoveAction && Input->GetActionValue(GamepadMoveAction).IsNonZero()));
 	UAnimMontage* Montage = bHasDirectionInput ? DoubleJumpMontage.Get() : BackwardDoubleJumpMontage.Get();
 	if (Montage)
 	{
@@ -172,8 +181,8 @@ void ADBPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 		UE_LOG(LogDBPlayer, Error, TEXT("%s requires an EnhancedInputComponent."), *GetName());
 		return;
 	}
-	if (!MoveAction || !GamepadMoveAction || !MouseLookAction || !GamepadLookAction || !JumpAction || !WalkAction || !EvadeAction
-		|| !LightAttackAction || !HeavyAttackAction || !LockOnAction || !SwitchTargetAction)
+	if (!MoveAction || !GamepadMoveAction || !MouseLookAction || !GamepadLookAction || !JumpAction || !WalkAction
+	    || !EvadeAction || !LightAttackAction || !HeavyAttackAction || !LockOnAction || !SwitchTargetAction)
 	{
 		UE_LOG(LogDBPlayer, Error, TEXT("Assign all eleven input actions on %s's Blueprint defaults."), *GetName());
 		return;
@@ -243,7 +252,8 @@ void ADBPlayerCharacter::MoveGamepad(const FInputActionValue& Value)
 		StopGamepadMovement();
 		return;
 	}
-	const float Threshold = bGamepadRunSelected ? FMath::Min(GamepadWalkThreshold, GamepadRunThreshold) : GamepadRunThreshold;
+	const float Threshold =
+	    bGamepadRunSelected ? FMath::Min(GamepadWalkThreshold, GamepadRunThreshold) : GamepadRunThreshold;
 	bGamepadRunSelected = Axes.Size() >= Threshold;
 	bUsingGamepadMovement = true;
 	AddDirectionalMovement(Axes.GetSafeNormal());
@@ -262,7 +272,10 @@ void ADBPlayerCharacter::StopGamepadMovement()
 
 void ADBPlayerCharacter::AddDirectionalMovement(const FVector2D& Axes)
 {
-	if (HealthComponent->IsDead()) { return; }
+	if (HealthComponent->IsDead())
+	{
+		return;
+	}
 	if (AActor* Target = TargetingComponent->GetLockedTarget(); TargetingComponent->IsLockedOn() && Target)
 	{
 		const FVector Forward = (Target->GetActorLocation() - GetActorLocation()).GetSafeNormal2D();
@@ -277,7 +290,10 @@ void ADBPlayerCharacter::AddDirectionalMovement(const FVector2D& Axes)
 
 void ADBPlayerCharacter::LookMouse(const FInputActionValue& Value)
 {
-	if (TargetingComponent->IsLockedOn()) { return; }
+	if (TargetingComponent->IsLockedOn())
+	{
+		return;
+	}
 	const FVector2D Delta = Value.Get<FVector2D>();
 	AddControllerYawInput(Delta.X * MouseSensitivity.X);
 	AddControllerPitchInput(Delta.Y * MouseSensitivity.Y);
@@ -286,7 +302,11 @@ void ADBPlayerCharacter::LookMouse(const FInputActionValue& Value)
 void ADBPlayerCharacter::LookGamepad(const FInputActionValue& Value)
 {
 	const FVector2D Stick = Value.Get<FVector2D>();
-	if (TargetingComponent->IsLockedOn()) { TargetingComponent->HandleStickSwitch(Stick.X); return; }
+	if (TargetingComponent->IsLockedOn())
+	{
+		TargetingComponent->HandleStickSwitch(Stick.X);
+		return;
+	}
 	const float DeltaSeconds = GetWorld()->GetDeltaSeconds();
 	AddControllerYawInput(Stick.X * GamepadLookRate.X * DeltaSeconds);
 	AddControllerPitchInput(Stick.Y * GamepadLookRate.Y * DeltaSeconds);
@@ -305,7 +325,10 @@ void ADBPlayerCharacter::ToggleLockOn()
 		StopSprinting();
 		const auto* PC = Cast<APlayerController>(Controller);
 		const auto* Input = PC ? Cast<UEnhancedPlayerInput>(PC->PlayerInput) : nullptr;
-		if (Input && GamepadLookAction) { TargetingComponent->HandleStickSwitch(Input->GetActionValue(GamepadLookAction).Get<FVector2D>().X); }
+		if (Input && GamepadLookAction)
+		{
+			TargetingComponent->HandleStickSwitch(Input->GetActionValue(GamepadLookAction).Get<FVector2D>().X);
+		}
 	}
 }
 
@@ -345,11 +368,13 @@ void ADBPlayerCharacter::StopWalking()
 void ADBPlayerCharacter::UpdateSprint()
 {
 	const APlayerController* PlayerController = Cast<APlayerController>(Controller);
-	const UEnhancedPlayerInput* Input = PlayerController ? Cast<UEnhancedPlayerInput>(PlayerController->PlayerInput) : nullptr;
-	const FInputActionInstance* EvadeInput = Input && EvadeAction ? Input->FindActionInstanceData(EvadeAction) : nullptr;
+	const UEnhancedPlayerInput* Input =
+	    PlayerController ? Cast<UEnhancedPlayerInput>(PlayerController->PlayerInput) : nullptr;
+	const FInputActionInstance* EvadeInput =
+	    Input && EvadeAction ? Input->FindActionInstanceData(EvadeAction) : nullptr;
 	// A fresh press belongs to evade/chaining; sprint requires a continued hold.
-	const bool bHeld = !(bWalkInputHeld && !bUsingGamepadMovement)
-		&& EvadeInput && EvadeInput->GetValue().IsNonZero() && EvadeInput->GetTriggeredTime() >= 0.15f;
+	const bool bHeld = !(bWalkInputHeld && !bUsingGamepadMovement) && EvadeInput && EvadeInput->GetValue().IsNonZero()
+	                   && EvadeInput->GetTriggeredTime() >= 0.15f;
 	CombatComponent->SetEvadeHeld(bHeld, SprintSpeed);
 	const bool bCanSprint = bHeld && GetCharacterMovement()->IsMovingOnGround();
 	bSprinting = bCanSprint && (bSprinting || CombatComponent->TryTransitionToSprint());
@@ -409,8 +434,8 @@ void ADBPlayerCharacter::AddMappingContext()
 {
 	const APlayerController* PlayerController = Cast<APlayerController>(Controller);
 	ULocalPlayer* LocalPlayer = PlayerController ? PlayerController->GetLocalPlayer() : nullptr;
-	UEnhancedInputLocalPlayerSubsystem* Subsystem = LocalPlayer
-		? LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>() : nullptr;
+	UEnhancedInputLocalPlayerSubsystem* Subsystem =
+	    LocalPlayer ? LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>() : nullptr;
 
 	if (!Subsystem)
 	{
@@ -431,8 +456,8 @@ void ADBPlayerCharacter::ReleaseMappingContext()
 {
 	const APlayerController* PlayerController = Cast<APlayerController>(Controller);
 	ULocalPlayer* LocalPlayer = PlayerController ? PlayerController->GetLocalPlayer() : nullptr;
-	UEnhancedInputLocalPlayerSubsystem* Subsystem = LocalPlayer
-		? LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>() : nullptr;
+	UEnhancedInputLocalPlayerSubsystem* Subsystem =
+	    LocalPlayer ? LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>() : nullptr;
 	if (Subsystem && GameplayMappingContext)
 	{
 		Subsystem->RemoveMappingContext(GameplayMappingContext);
@@ -451,4 +476,3 @@ void ADBPlayerCharacter::UnPossessed()
 	ReleaseMappingContext();
 	Super::UnPossessed();
 }
-

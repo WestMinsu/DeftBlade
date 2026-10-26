@@ -2,6 +2,8 @@
 /*
 !/.gitignore
 !/.gitattributes
+!/.clang-format
+!/.editorconfig
 !/DeftBlade.uproject
 
 # First-party C++ implementations, including Source/Private, are reviewable.

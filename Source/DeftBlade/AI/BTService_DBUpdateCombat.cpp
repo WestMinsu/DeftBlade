@@ -14,5 +14,8 @@ UBTService_DBUpdateCombat::UBTService_DBUpdateCombat()
 void UBTService_DBUpdateCombat::TickNode(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory, float DeltaSeconds)
 {
 	Super::TickNode(OwnerComp, NodeMemory, DeltaSeconds);
-	if (auto* AI = Cast<ADBEnemyAIController>(OwnerComp.GetAIOwner())) { AI->RefreshCombatState(); }
+	if (auto* AI = Cast<ADBEnemyAIController>(OwnerComp.GetAIOwner()))
+	{
+		AI->RefreshCombatState();
+	}
 }

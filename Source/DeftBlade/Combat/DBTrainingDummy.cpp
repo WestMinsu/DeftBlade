@@ -23,7 +23,10 @@ ADBTrainingDummy::ADBTrainingDummy()
 	Body->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Body->SetRelativeScale3D(FVector(0.55f, 0.55f, 1.8f));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (Cube.Succeeded()) { Body->SetStaticMesh(Cube.Object); }
+	if (Cube.Succeeded())
+	{
+		Body->SetStaticMesh(Cube.Object);
+	}
 	HealthText = CreateDefaultSubobject<UTextRenderComponent>(TEXT("HealthText"));
 	HealthText->SetupAttachment(Capsule);
 	HealthText->SetRelativeLocation(FVector(0, 0, 120));
@@ -43,7 +46,8 @@ void ADBTrainingDummy::BeginPlay()
 	UpdateHealthText(HealthComponent->GetHealth(), HealthComponent->GetMaxHealth());
 }
 
-float ADBTrainingDummy::TakeDamage(float Amount, const FDamageEvent& Event, AController* EventInstigator, AActor* Causer)
+float ADBTrainingDummy::TakeDamage(
+    float Amount, const FDamageEvent& Event, AController* EventInstigator, AActor* Causer)
 {
 	const float Applied = HealthComponent->ApplyDamage(Amount);
 	if (Applied > 0.0f)
@@ -51,7 +55,10 @@ float ADBTrainingDummy::TakeDamage(float Amount, const FDamageEvent& Event, ACon
 		Super::TakeDamage(Applied, Event, EventInstigator, Causer);
 		if (!HealthComponent->IsDead())
 		{
-			if (BodyMaterial) { BodyMaterial->SetVectorParameterValue(TEXT("Color"), FLinearColor(1.0f, 0.12f, 0.025f)); }
+			if (BodyMaterial)
+			{
+				BodyMaterial->SetVectorParameterValue(TEXT("Color"), FLinearColor(1.0f, 0.12f, 0.025f));
+			}
 			GetWorldTimerManager().SetTimer(FeedbackTimer, this, &ThisClass::RestoreColor, 0.12f, false);
 		}
 	}
@@ -65,7 +72,10 @@ void ADBTrainingDummy::UpdateHealthText(float Current, float Maximum)
 
 void ADBTrainingDummy::RestoreColor()
 {
-	if (BodyMaterial) { BodyMaterial->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.04f, 0.3f, 0.65f)); }
+	if (BodyMaterial)
+	{
+		BodyMaterial->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.04f, 0.3f, 0.65f));
+	}
 }
 
 void ADBTrainingDummy::HandleDeath()
@@ -74,7 +84,10 @@ void ADBTrainingDummy::HandleDeath()
 	SetActorEnableCollision(false);
 	HealthText->SetText(FText::FromString(TEXT("HP 0 - DOWN")));
 	HealthText->SetTextRenderColor(FColor(180, 180, 180));
-	if (BodyMaterial) { BodyMaterial->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.09f, 0.09f, 0.09f)); }
+	if (BodyMaterial)
+	{
+		BodyMaterial->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.09f, 0.09f, 0.09f));
+	}
 }
 
 void ADBTrainingDummy::EndPlay(const EEndPlayReason::Type EndPlayReason)

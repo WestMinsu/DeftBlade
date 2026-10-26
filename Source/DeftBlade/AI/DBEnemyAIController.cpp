@@ -28,7 +28,10 @@ ADBEnemyAIController::ADBEnemyAIController()
 
 ETeamAttitude::Type ADBEnemyAIController::GetTeamAttitudeTowards(const AActor& Other) const
 {
-	if (Other.IsA<ADBPlayerCharacter>()) { return ETeamAttitude::Hostile; }
+	if (Other.IsA<ADBPlayerCharacter>())
+	{
+		return ETeamAttitude::Hostile;
+	}
 	return Other.IsA<ADBEnemyCharacter>() ? ETeamAttitude::Friendly : ETeamAttitude::Neutral;
 }
 
@@ -48,7 +51,10 @@ void ADBEnemyAIController::ForgetTarget()
 {
 	if (TrackedTarget.IsValid())
 	{
-		if (auto* Health = TrackedTarget->FindComponentByClass<UDBHealthComponent>()) { Health->OnDeath.RemoveAll(this); }
+		if (auto* Health = TrackedTarget->FindComponentByClass<UDBHealthComponent>())
+		{
+			Health->OnDeath.RemoveAll(this);
+		}
 	}
 	TrackedTarget.Reset();
 	bHasSight = false;
@@ -57,9 +63,15 @@ void ADBEnemyAIController::ForgetTarget()
 
 void ADBEnemyAIController::PerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
 {
-	if (!IsValid(Actor) || !Actor->IsA<ADBPlayerCharacter>()) { return; }
+	if (!IsValid(Actor) || !Actor->IsA<ADBPlayerCharacter>())
+	{
+		return;
+	}
 	const auto* Health = Actor->FindComponentByClass<UDBHealthComponent>();
-	if (!Health || Health->IsDead()) { return; }
+	if (!Health || Health->IsDead())
+	{
+		return;
+	}
 	if (Stimulus.WasSuccessfullySensed())
 	{
 		if (TrackedTarget.Get() != Actor)
@@ -70,16 +82,23 @@ void ADBEnemyAIController::PerceptionUpdated(AActor* Actor, FAIStimulus Stimulus
 		}
 		bHasSight = true;
 	}
-	else if (TrackedTarget.Get() == Actor) { bHasSight = false; }
+	else if (TrackedTarget.Get() == Actor)
+	{
+		bHasSight = false;
+	}
 	RefreshCombatState();
 }
 
 void ADBEnemyAIController::RememberAttacker(AActor* Attacker)
 {
-	if (!IsValid(Attacker) || !Attacker->IsA<ADBPlayerCharacter>()) { return; }
+	if (!IsValid(Attacker) || !Attacker->IsA<ADBPlayerCharacter>())
+	{
+		return;
+	}
 	if (TrackedTarget.Get() != Attacker)
 	{
-		ForgetTarget();TrackedTarget = Attacker;
+		ForgetTarget();
+		TrackedTarget = Attacker;
 		Attacker->FindComponentByClass<UDBHealthComponent>()->OnDeath.AddUObject(this, &ThisClass::ForgetTarget);
 	}
 	LastSeenLocation = Attacker->GetActorLocation();
@@ -96,10 +115,16 @@ void ADBEnemyAIController::RememberAttacker(AActor* Attacker)
 
 void ADBEnemyAIController::RefreshCombatState()
 {
-	if (!Blackboard) { return; }
+	if (!Blackboard)
+	{
+		return;
+	}
 	const auto* Enemy = Cast<ADBEnemyCharacter>(GetPawn());
 	const double Now = GetWorld()->GetTimeSeconds();
-	if (!TrackedTarget.IsValid() || TrackedTarget->FindComponentByClass<UDBHealthComponent>()->IsDead()) { ForgetTarget(); }
+	if (!TrackedTarget.IsValid() || TrackedTarget->FindComponentByClass<UDBHealthComponent>()->IsDead())
+	{
+		ForgetTarget();
+	}
 	if (bHasSight && TrackedTarget.IsValid())
 	{
 		LastSeenLocation = TrackedTarget->GetActorLocation();
@@ -108,16 +133,22 @@ void ADBEnemyAIController::RefreshCombatState()
 	const bool bCanAct = Enemy && Enemy->CanAct();
 	AActor* VisibleTarget = bHasSight ? TrackedTarget.Get() : nullptr;
 	const auto* Combat = Enemy ? Enemy->FindComponentByClass<UDBCombatComponent>() : nullptr;
-	const bool bInRange = VisibleTarget && Enemy && FVector::DistSquared2D(Enemy->GetActorLocation(), VisibleTarget->GetActorLocation()) <= FMath::Square(Enemy->GetAttackRange())
-		&& FMath::Abs(Enemy->GetActorLocation().Z - VisibleTarget->GetActorLocation().Z) < 100;
+	const bool bInRange = VisibleTarget && Enemy
+	                      && FVector::DistSquared2D(Enemy->GetActorLocation(), VisibleTarget->GetActorLocation())
+	                             <= FMath::Square(Enemy->GetAttackRange())
+	                      && FMath::Abs(Enemy->GetActorLocation().Z - VisibleTarget->GetActorLocation().Z) < 100;
 	Blackboard->SetValueAsBool(DBEnemyBB::CanAct, bCanAct);
 	Blackboard->SetValueAsObject(DBEnemyBB::Target, VisibleTarget);
 	Blackboard->SetValueAsVector(DBEnemyBB::LastKnownLocation, LastSeenLocation);
-	Blackboard->SetValueAsBool(DBEnemyBB::HasLastKnownLocation, TrackedTarget.IsValid() && Now - LastSeenAt < SearchDuration);
+	Blackboard->SetValueAsBool(
+	    DBEnemyBB::HasLastKnownLocation, TrackedTarget.IsValid() && Now - LastSeenAt < SearchDuration);
 	// Finish a committed swing even if the target steps out of reach; loss/death still aborts it.
-	Blackboard->SetValueAsBool(DBEnemyBB::CanAttack, bCanAct && VisibleTarget && Combat
-		&& (Combat->IsAttacking() || (bInRange && Now >= NextAttackAt)));
-	if (TrackedTarget.IsValid() && !bHasSight && Now - LastSeenAt >= SearchDuration) { ForgetTarget(); }
+	Blackboard->SetValueAsBool(DBEnemyBB::CanAttack,
+	    bCanAct && VisibleTarget && Combat && (Combat->IsAttacking() || (bInRange && Now >= NextAttackAt)));
+	if (TrackedTarget.IsValid() && !bHasSight && Now - LastSeenAt >= SearchDuration)
+	{
+		ForgetTarget();
+	}
 }
 
 void ADBEnemyAIController::AttackFinished()
@@ -137,7 +168,10 @@ void ADBEnemyAIController::StopBehavior()
 		Blackboard->SetValueAsBool(DBEnemyBB::CanAttack, false);
 		Blackboard->SetValueAsBool(DBEnemyBB::HasLastKnownLocation, false);
 	}
-	if (BrainComponent) { BrainComponent->StopLogic(TEXT("Enemy stopped")); }
+	if (BrainComponent)
+	{
+		BrainComponent->StopLogic(TEXT("Enemy stopped"));
+	}
 	GetPerceptionComponent()->SetSenseEnabled(SightConfig->GetSenseImplementation(), false);
 }
 

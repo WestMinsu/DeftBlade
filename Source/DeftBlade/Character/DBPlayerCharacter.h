@@ -25,8 +25,8 @@ public:
 	ADBPlayerCharacter();
 	virtual void PawnClientRestart() override;
 	virtual void UnPossessed() override;
-	virtual float TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent,
-		AController* EventInstigator, AActor* DamageCauser) override;
+	virtual float TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent, AController* EventInstigator,
+	    AActor* DamageCauser) override;
 
 protected:
 	virtual void BeginPlay() override;

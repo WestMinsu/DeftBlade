@@ -54,12 +54,19 @@ bool ADBEnemyCharacter::CanAct() const
 	return !HealthComponent->IsDead() && ReactionInstanceId == INDEX_NONE;
 }
 
-float ADBEnemyCharacter::TakeDamage(float Amount, const FDamageEvent& Event, AController* EventInstigator, AActor* Causer)
+float ADBEnemyCharacter::TakeDamage(
+    float Amount, const FDamageEvent& Event, AController* EventInstigator, AActor* Causer)
 {
 	const float Applied = HealthComponent->ApplyDamage(Amount);
-	if (Applied <= 0) { return 0; }
+	if (Applied <= 0)
+	{
+		return 0;
+	}
 	Super::TakeDamage(Applied, Event, EventInstigator, Causer);
-	if (HealthComponent->IsDead()) { return Applied; }
+	if (HealthComponent->IsDead())
+	{
+		return Applied;
+	}
 	CombatComponent->ResetCombat();
 	if (auto* AI = Cast<ADBEnemyAIController>(GetController()))
 	{
@@ -68,14 +75,17 @@ float ADBEnemyCharacter::TakeDamage(float Amount, const FDamageEvent& Event, ACo
 	}
 	GetCharacterMovement()->StopMovementImmediately();
 	StopReaction();
-	if (UAnimInstance* Anim = GetMesh()->GetAnimInstance(); Anim && HitReactionMontage
-		&& Anim->Montage_Play(HitReactionMontage) > 0)
+	if (UAnimInstance* Anim = GetMesh()->GetAnimInstance();
+	    Anim && HitReactionMontage && Anim->Montage_Play(HitReactionMontage) > 0)
 	{
 		auto* Instance = Anim->GetActiveInstanceForMontage(HitReactionMontage);
 		ReactionInstanceId = Instance->GetInstanceID();
 		Instance->OnMontageEnded.BindUObject(this, &ThisClass::ReactionEnded, ReactionInstanceId);
 	}
-	if (auto* AI = Cast<ADBEnemyAIController>(GetController())) { AI->RefreshCombatState(); }
+	if (auto* AI = Cast<ADBEnemyAIController>(GetController()))
+	{
+		AI->RefreshCombatState();
+	}
 	return Applied;
 }
 
@@ -94,9 +104,15 @@ void ADBEnemyCharacter::StopReaction()
 
 void ADBEnemyCharacter::ReactionEnded(UAnimMontage*, bool, int32 InstanceId)
 {
-	if (InstanceId != ReactionInstanceId) { return; }
+	if (InstanceId != ReactionInstanceId)
+	{
+		return;
+	}
 	ReactionInstanceId = INDEX_NONE;
-	if (auto* AI = Cast<ADBEnemyAIController>(GetController())) { AI->RefreshCombatState(); }
+	if (auto* AI = Cast<ADBEnemyAIController>(GetController()))
+	{
+		AI->RefreshCombatState();
+	}
 }
 
 void ADBEnemyCharacter::UpdateHealthText(float Current, float Maximum)
@@ -106,7 +122,10 @@ void ADBEnemyCharacter::UpdateHealthText(float Current, float Maximum)
 
 void ADBEnemyCharacter::HandleDeath()
 {
-	if (auto* AI = Cast<ADBEnemyAIController>(GetController())) { AI->StopBehavior(); }
+	if (auto* AI = Cast<ADBEnemyAIController>(GetController()))
+	{
+		AI->StopBehavior();
+	}
 	CombatComponent->ResetCombat();
 	StopReaction();
 	GetCharacterMovement()->DisableMovement();

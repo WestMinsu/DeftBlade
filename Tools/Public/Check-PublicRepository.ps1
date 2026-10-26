@@ -18,7 +18,7 @@ if ($Staged) {
 if ($LASTEXITCODE -ne 0) { throw 'Could not enumerate repository files.' }
 
 $allowedPatterns = @(
-    '^\.gitignore$', '^\.gitattributes$', '^README\.md$',
+    '^\.gitignore$', '^\.gitattributes$', '^\.clang-format$', '^\.editorconfig$', '^README\.md$',
     ('^' + $escapedName + '\.uproject$'),
     '^Source/[A-Za-z0-9_./-]+\.(cpp|h|hpp|inl|cs)$',
     '^Config/Default(Engine|Game|Input)\.ini$',

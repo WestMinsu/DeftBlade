@@ -3,4 +3,4 @@
 #include "DeftBlade.h"
 #include "Modules/ModuleManager.h"
 
-IMPLEMENT_PRIMARY_GAME_MODULE( FDefaultGameModuleImpl, DeftBlade, "DeftBlade" );
+IMPLEMENT_PRIMARY_GAME_MODULE(FDefaultGameModuleImpl, DeftBlade, "DeftBlade");

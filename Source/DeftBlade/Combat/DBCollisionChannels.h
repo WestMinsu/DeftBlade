@@ -5,5 +5,5 @@
 // Melee in DefaultEngine.ini: damageable capsules overlap, world geometry blocks.
 namespace DBCollision
 {
-inline constexpr ECollisionChannel Melee = ECC_GameTraceChannel1;
+	inline constexpr ECollisionChannel Melee = ECC_GameTraceChannel1;
 }
