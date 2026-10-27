@@ -4,17 +4,15 @@
 #include "Animation/AnimInstance.h"
 #include "DBAnimInstance.generated.h"
 
-/** Locomotion measurements only; the AnimBP composes poses, slots and foot IK. */
+/** Limited lock-on glance; the AnimBP owns locomotion, slots and foot IK. */
 UCLASS()
 class DEFTBLADE_API UDBAnimInstance : public UAnimInstance
 {
 	GENERATED_BODY()
 protected:
 	virtual void NativeUpdateAnimation(float DeltaSeconds) override;
-	UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
-	bool bUseLockLocomotion = false;
-	UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
-	float LockForwardSpeed = 0;
-	UPROPERTY(BlueprintReadOnly, Category = "Locomotion")
-	float LockRightSpeed = 0;
+	UPROPERTY(BlueprintReadOnly, Category = "Targeting")
+	FRotator LockNeckRotation = FRotator::ZeroRotator;
+	UPROPERTY(BlueprintReadOnly, Category = "Targeting")
+	FRotator LockHeadRotation = FRotator::ZeroRotator;
 };

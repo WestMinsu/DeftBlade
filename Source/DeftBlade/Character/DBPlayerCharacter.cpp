@@ -276,13 +276,6 @@ void ADBPlayerCharacter::AddDirectionalMovement(const FVector2D& Axes)
 	{
 		return;
 	}
-	if (AActor* Target = TargetingComponent->GetLockedTarget(); TargetingComponent->IsLockedOn() && Target)
-	{
-		const FVector Forward = (Target->GetActorLocation() - GetActorLocation()).GetSafeNormal2D();
-		AddMovementInput(Forward, Axes.Y);
-		AddMovementInput(FVector::CrossProduct(FVector::UpVector, Forward), Axes.X);
-		return;
-	}
 	const FRotationMatrix YawRotation(FRotator(0.0, Controller->GetControlRotation().Yaw, 0.0));
 	AddMovementInput(YawRotation.GetUnitAxis(EAxis::X), Axes.Y);
 	AddMovementInput(YawRotation.GetUnitAxis(EAxis::Y), Axes.X);

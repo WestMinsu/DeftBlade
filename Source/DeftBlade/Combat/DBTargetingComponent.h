@@ -50,6 +50,10 @@ protected:
 	float LockOnMaxHeight = 400.0f;
 	UPROPERTY(EditDefaultsOnly, Category = "Targeting|LockOn", meta = (ClampMin = "0"))
 	float OcclusionGraceTime = 0.35f;
+	UPROPERTY(EditDefaultsOnly, Category = "Targeting|LockOn", meta = (ClampMin = "0", ClampMax = "45"))
+	float LockCameraYawDeadZone = 25.0f;
+	UPROPERTY(EditDefaultsOnly, Category = "Targeting|LockOn", meta = (ClampMin = "0"))
+	float LockCameraTurnRate = 60.0f;
 
 private:
 	bool CanUseLockOn() const;
@@ -61,7 +65,6 @@ private:
 	TWeakObjectPtr<AActor> SoftTarget;
 	TWeakObjectPtr<AActor> LockedTarget;
 	bool bLockOnActive = false;
-	bool bWasOrientingToMovement = true;
 	bool bStickSwitchArmed = false;
 	float OccludedTime = 0.0f;
 };

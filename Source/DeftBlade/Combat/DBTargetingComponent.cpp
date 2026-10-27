@@ -2,14 +2,12 @@
 
 #include "Combat/DBCollisionChannels.h"
 #include "Combat/DBHealthComponent.h"
-#include "Combat/DBCombatComponent.h"
 #include "Camera/CameraComponent.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "GenericTeamAgentInterface.h"
@@ -227,9 +225,6 @@ void UDBTargetingComponent::SetLockedTarget(AActor* Target)
 {
 	if (!bLockOnActive)
 	{
-		auto* Movement = CastChecked<ACharacter>(GetOwner())->GetCharacterMovement();
-		bWasOrientingToMovement = Movement->bOrientRotationToMovement;
-		Movement->bOrientRotationToMovement = false;
 		bLockOnActive = true;
 		bStickSwitchArmed = false;
 		SetComponentTickEnabled(true);
@@ -248,10 +243,6 @@ void UDBTargetingComponent::ClearLockOn()
 	LockedTarget.Reset();
 	OccludedTime = 0;
 	bStickSwitchArmed = false;
-	if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
-	{
-		Character->GetCharacterMovement()->bOrientRotationToMovement = bWasOrientingToMovement;
-	}
 	SetComponentTickEnabled(false);
 }
 
@@ -332,19 +323,23 @@ void UDBTargetingComponent::TickComponent(
 	}
 	ACharacter* Character = CastChecked<ACharacter>(GetOwner());
 	auto* PC = CastChecked<APlayerController>(Character->GetController());
+	// Follow only the angle outside the tolerance, with damping and a degrees/second limit.
+	const double Alpha = 1.0 - FMath::Exp(-6.0 * DeltaTime);
+	const auto FollowAngle = [DeltaTime, Alpha](double Current, double Desired, double Tolerance, double Rate)
+	{
+		const double Error = FMath::FindDeltaAngleDegrees(Current, Desired);
+		const double Outside = Error - FMath::Clamp(Error, -Tolerance, Tolerance);
+		const double Limit = Rate * DeltaTime;
+		return Current + FMath::Clamp(Outside * Alpha, -Limit, Limit);
+	};
 	const FVector Focus = GetTargetPoint();
 	// Aim from above the player so the follow camera frames both combatants without a position-feedback loop.
 	const double ViewHeight = 110.0 + 0.28 * FVector::Dist2D(Focus, Character->GetActorLocation());
 	FRotator View = (Focus - (Character->GetActorLocation() + FVector(0, 0, ViewHeight))).Rotation();
 	View.Pitch = FMath::Clamp(View.Pitch, -45.0, 20.0);
-	PC->SetControlRotation(FMath::RInterpTo(PC->GetControlRotation(), View, DeltaTime, 8.0f));
-	const UDBCombatComponent* Combat = Character->FindComponentByClass<UDBCombatComponent>();
-	if (!Combat || Combat->GetActionState() == EDBActionState::None)
-	{
-		const double Yaw = FMath::FixedTurn(Character->GetActorRotation().Yaw,
-		    (Focus - Character->GetActorLocation()).Rotation().Yaw, 720.0 * DeltaTime);
-		Character->SetActorRotation(FRotator(0, Yaw, 0));
-	}
+	const FRotator CurrentView = PC->GetControlRotation();
+	PC->SetControlRotation(FRotator(FollowAngle(CurrentView.Pitch, View.Pitch, 4.0, 60.0),
+	    FollowAngle(CurrentView.Yaw, View.Yaw, LockCameraYawDeadZone, LockCameraTurnRate), 0));
 }
 
 void UDBTargetingComponent::EndPlay(const EEndPlayReason::Type Reason)
