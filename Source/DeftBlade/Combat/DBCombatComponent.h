@@ -4,6 +4,7 @@
 #include "Components/ActorComponent.h"
 #include "DBCombatComponent.generated.h"
 
+class ACharacter;
 class UAnimMontage;
 class UCurveFloat;
 class UStaticMeshComponent;
@@ -25,7 +26,8 @@ enum class EDBActionInput : uint8
 	Evade,
 	LightAttack,
 	HeavyAttack,
-	Jump
+	Jump,
+	Launcher
 };
 
 UENUM(BlueprintType)
@@ -41,10 +43,15 @@ enum class EDBAttackId : uint8
 	Heavy3,
 	Heavy4,
 	Light1Heavy,
-	Light2Heavy
+	Light2Heavy,
+	AirLight1,
+	AirLight2,
+	AirLight3,
+	Launcher,
+	AirHeavy
 };
 
-/** One deliberate press. Id == 0 means the slot is empty. */
+/** One pending action request. Id == 0 means the slot is empty. */
 USTRUCT()
 struct FDBBufferedAction
 {
@@ -153,6 +160,7 @@ public:
 		HeldGlideSpeed = SprintSpeed;
 	}
 	bool TryTransitionToSprint();
+	void HandleLanding();
 	void ResetAirEvade()
 	{
 		bAirEvadeUsed = false;
@@ -271,10 +279,15 @@ private:
 	bool CanProcessInput() const;
 	void QueueInput(EDBActionInput Input);
 	EDBAttackId NextAttack(EDBActionInput Input) const;
+	bool IsAttackMovementValid(EDBAttackId Id) const;
 	const FDBAttackDefinition* FindAttack(EDBAttackId Id) const;
 	void TryStartJump();
 	void TryStartEvade(double Now);
 	void TryStartAttack();
+	void UpdateAttackMovement(float DeltaTime);
+	void StartAirMovement(float Duration);
+	void HoldAirborne(ACharacter* Attacker);
+	void StopAirMovement();
 	void SampleAttackWindow(float Position);
 	void AttackBlendingOut(UAnimMontage* Montage, bool bInterrupted, uint64 ActionId);
 	void AttackEnded(UAnimMontage* Montage, bool bInterrupted, uint64 ActionId);
@@ -297,6 +310,9 @@ private:
 	double ChainStartsAt = 0.0;
 	uint64 NextRequestId = 0;
 	uint16 EvadeMotionId = 0;
+	uint16 AirMotionId = 0;
+	TWeakObjectPtr<ACharacter> JuggleAttacker;
+	double JuggleHeight = 0.0;
 	double HeldSlideTime = 0.0;
 	FVector EvadeDirection = FVector::ForwardVector;
 	float HeldGlideSpeed = 0.0f;
@@ -304,6 +320,7 @@ private:
 	bool bBlendingToSprint = false;
 	bool bBackwardEvade = false;
 	bool bAirEvadeUsed = false;
+	bool bAirLightComboUsed = false;
 	UPROPERTY(Transient)
 	FDBAttackDefinition ActiveAttack;
 	int32 ActiveHitWindow = INDEX_NONE;
@@ -318,4 +335,7 @@ private:
 	FVector BladeTipLocal = FVector::ZeroVector;
 	TSet<TWeakObjectPtr<AActor>> HitActors;
 	bool bAttackEndedPending = false;
+	double GroundJumpPressedAt = -1.0;
+	bool bAttackMovementStarted = false;
+	bool bAttackLanded = false;
 };

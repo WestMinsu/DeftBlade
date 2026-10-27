@@ -26,6 +26,7 @@ ADBEnemyCharacter::ADBEnemyCharacter()
 	Movement->bOrientRotationToMovement = true;
 	Movement->RotationRate = FRotator(0, 540, 0);
 	Movement->MaxWalkSpeed = 340;
+	Movement->GravityScale = 2.0f;
 	CombatComponent = CreateDefaultSubobject<UDBCombatComponent>(TEXT("Combat"));
 	HealthComponent = CreateDefaultSubobject<UDBHealthComponent>(TEXT("Health"));
 	Movement->AddTickPrerequisiteComponent(CombatComponent);
@@ -51,7 +52,24 @@ void ADBEnemyCharacter::BeginPlay()
 
 bool ADBEnemyCharacter::CanAct() const
 {
-	return !HealthComponent->IsDead() && ReactionInstanceId == INDEX_NONE;
+	return !HealthComponent->IsDead() && ReactionInstanceId == INDEX_NONE && GetCharacterMovement()->IsMovingOnGround();
+}
+
+void ADBEnemyCharacter::OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode)
+{
+	Super::OnMovementModeChanged(PreviousMovementMode, PreviousCustomMode);
+	if (GetCharacterMovement()->IsFalling())
+	{
+		StopReaction();
+	}
+	else if (GetCharacterMovement()->IsMovingOnGround())
+	{
+		CombatComponent->HandleLanding();
+	}
+	if (auto* AI = Cast<ADBEnemyAIController>(GetController()))
+	{
+		AI->RefreshCombatState();
+	}
 }
 
 float ADBEnemyCharacter::TakeDamage(
@@ -73,10 +91,13 @@ float ADBEnemyCharacter::TakeDamage(
 		AI->StopMovement();
 		AI->RememberAttacker(EventInstigator ? EventInstigator->GetPawn() : Causer);
 	}
+	const double FallingSpeed = GetCharacterMovement()->IsFalling() ? GetVelocity().Z : 0.0;
 	GetCharacterMovement()->StopMovementImmediately();
+	GetCharacterMovement()->Velocity.Z = FallingSpeed;
 	StopReaction();
-	if (UAnimInstance* Anim = GetMesh()->GetAnimInstance();
-	    Anim && HitReactionMontage && Anim->Montage_Play(HitReactionMontage) > 0)
+	if (UAnimInstance* Anim = GetMesh()->GetAnimInstance(); Anim && GetCharacterMovement()->IsMovingOnGround()
+	                                                        && HitReactionMontage
+	                                                        && Anim->Montage_Play(HitReactionMontage) > 0)
 	{
 		auto* Instance = Anim->GetActiveInstanceForMontage(HitReactionMontage);
 		ReactionInstanceId = Instance->GetInstanceID();
