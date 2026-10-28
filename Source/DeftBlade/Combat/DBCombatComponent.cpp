@@ -136,6 +136,10 @@ void UDBCombatComponent::QueueInput(EDBActionInput Input)
 		ResetCombat();
 		return;
 	}
+	if (ActionState == EDBActionState::HitReaction)
+	{
+		return;
+	}
 	const ACharacter* Character = CastChecked<ACharacter>(GetOwner());
 	const double Now = GetWorld()->GetTimeSeconds();
 	const bool bGrounded = Character->GetCharacterMovement()->IsMovingOnGround();
@@ -244,6 +248,10 @@ const FDBAttackDefinition* UDBCombatComponent::FindAttack(EDBAttackId Id) const
 
 bool UDBCombatComponent::CanJumpFromAction() const
 {
+	if (ActionState == EDBActionState::HitReaction)
+	{
+		return false;
+	}
 	if (IsAttacking())
 	{
 		if (ActiveAttack.Id == EDBAttackId::Launcher && bAttackMovementStarted
@@ -316,6 +324,17 @@ void UDBCombatComponent::TickComponent(
 	if (!CanProcessInput())
 	{
 		ResetCombat();
+		return;
+	}
+	if (ActionState == EDBActionState::HitReaction)
+	{
+		ACharacter* Character = CastChecked<ACharacter>(GetOwner());
+		Character->ConsumeMovementInputVector();
+		UAnimInstance* Anim = Character->GetMesh()->GetAnimInstance();
+		if (!Anim || !Anim->GetMontageInstanceForID(ReactionMontageInstanceId))
+		{
+			FinishAction(ActiveActionId);
+		}
 		return;
 	}
 
@@ -580,6 +599,7 @@ bool UDBCombatComponent::FinishAction(uint64 ExpectedActionId, bool bInterrupted
 	    GetWorld()->GetTimeSeconds());
 	StopEvadeMovement();
 	StopAttackMontage();
+	StopHitReaction();
 	if (bInterrupted)
 	{
 		StopEvadeMontage();
@@ -861,6 +881,60 @@ void UDBCombatComponent::StopAttackMontage()
 		// An interrupted pose may fade, but its attack displacement must stop now.
 		Instance->PushDisableRootMotion();
 		Instance->Stop(FAlphaBlend(0.10f), true);
+	}
+}
+
+void UDBCombatComponent::ReactToHit(UAnimMontage* Montage)
+{
+	ResetCombat();
+	ACharacter* Character = CastChecked<ACharacter>(GetOwner());
+	UCharacterMovementComponent* Movement = Character->GetCharacterMovement();
+	const double FallingSpeed = Movement->IsFalling() ? Movement->Velocity.Z : 0.0;
+	Movement->StopMovementImmediately();
+	Movement->Velocity.Z = FallingSpeed;
+	Character->ConsumeMovementInputVector();
+	UAnimInstance* Anim = Character->GetMesh()->GetAnimInstance();
+	if (!Montage || !Anim || Anim->Montage_Play(Montage) <= 0.0f)
+	{
+		return;
+	}
+	FAnimMontageInstance* Instance = Anim->GetActiveInstanceForMontage(Montage);
+	check(Instance);
+	ReactionMontageInstanceId = Instance->GetInstanceID();
+	ActiveActionId = ++NextRequestId;
+	ActionStartedAt = GetWorld()->GetTimeSeconds();
+	ActionState = EDBActionState::HitReaction;
+	Instance->OnMontageBlendingOutStarted.BindUObject(this, &ThisClass::HitReactionBlendingOut, ActiveActionId);
+	Instance->OnMontageEnded.BindUObject(this, &ThisClass::HitReactionEnded, ActiveActionId);
+}
+
+void UDBCombatComponent::HitReactionBlendingOut(UAnimMontage*, bool bInterrupted, uint64 ActionId)
+{
+	if (bInterrupted)
+	{
+		FinishAction(ActionId);
+	}
+}
+
+void UDBCombatComponent::HitReactionEnded(UAnimMontage*, bool bInterrupted, uint64 ActionId)
+{
+	FinishAction(ActionId, bInterrupted);
+}
+
+void UDBCombatComponent::StopHitReaction()
+{
+	if (ReactionMontageInstanceId == INDEX_NONE)
+	{
+		return;
+	}
+	UAnimInstance* Anim = CastChecked<ACharacter>(GetOwner())->GetMesh()->GetAnimInstance();
+	FAnimMontageInstance* Instance = Anim ? Anim->GetMontageInstanceForID(ReactionMontageInstanceId) : nullptr;
+	ReactionMontageInstanceId = INDEX_NONE;
+	if (Instance)
+	{
+		Instance->OnMontageBlendingOutStarted.Unbind();
+		Instance->OnMontageEnded.Unbind();
+		Instance->Stop(FAlphaBlend(0.08f), true);
 	}
 }
 

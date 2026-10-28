@@ -15,7 +15,8 @@ enum class EDBActionState : uint8
 	None,
 	Evade,
 	LightAttack,
-	HeavyAttack
+	HeavyAttack,
+	HitReaction
 };
 
 /** A jump is a request; CMC owns its movement, so it is not a combat state. */
@@ -149,6 +150,7 @@ public:
 	void RequestEvade();
 	void RequestAttack(bool bHeavy);
 	void RequestJump();
+	void ReactToHit(UAnimMontage* Montage);
 	bool CanJumpFromAction() const;
 	void SetWeaponMesh(UStaticMeshComponent* InWeapon)
 	{
@@ -192,6 +194,7 @@ public:
 		return ActionState == EDBActionState::LightAttack || ActionState == EDBActionState::HeavyAttack;
 	}
 	bool IsAttackWindowOpen() const;
+	const FDBAttackDefinition* FindAttack(EDBAttackId Id) const;
 	/** Swept montage-time interval; a long frame crossing the whole window still emits once. */
 	FDBAttackWindowTraversed OnAttackWindowTraversed;
 	/** Accepted montage start, including buffered combo links; before the initial blade snapshot. */
@@ -280,7 +283,6 @@ private:
 	void QueueInput(EDBActionInput Input);
 	EDBAttackId NextAttack(EDBActionInput Input) const;
 	bool IsAttackMovementValid(EDBAttackId Id) const;
-	const FDBAttackDefinition* FindAttack(EDBAttackId Id) const;
 	void TryStartJump();
 	void TryStartEvade(double Now);
 	void TryStartAttack();
@@ -292,6 +294,9 @@ private:
 	void AttackBlendingOut(UAnimMontage* Montage, bool bInterrupted, uint64 ActionId);
 	void AttackEnded(UAnimMontage* Montage, bool bInterrupted, uint64 ActionId);
 	void StopAttackMontage();
+	void HitReactionBlendingOut(UAnimMontage* Montage, bool bInterrupted, uint64 ActionId);
+	void HitReactionEnded(UAnimMontage* Montage, bool bInterrupted, uint64 ActionId);
+	void StopHitReaction();
 	void BonesFinalized();
 	bool ConfigureBlade();
 	FTransform GetWeaponTransform() const;
@@ -325,6 +330,7 @@ private:
 	FDBAttackDefinition ActiveAttack;
 	int32 ActiveHitWindow = INDEX_NONE;
 	int32 AttackMontageInstanceId = INDEX_NONE;
+	int32 ReactionMontageInstanceId = INDEX_NONE;
 	float PreviousAttackPosition = 0.0f;
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMeshComponent> WeaponMesh;

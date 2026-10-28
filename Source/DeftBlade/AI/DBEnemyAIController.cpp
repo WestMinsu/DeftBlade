@@ -103,8 +103,7 @@ void ADBEnemyAIController::RememberAttacker(AActor* Attacker)
 	}
 	LastSeenLocation = Attacker->GetActorLocation();
 	LastSeenAt = GetWorld()->GetTimeSeconds();
-	// Damage reveals a location, not permanent sight. The sight sense must reacquire it.
-	bHasSight = false;
+	// Keep existing sight. A newly remembered attacker still needs the sight sense to acquire it.
 	if (GetPawn())
 	{
 		const FVector Direction = LastSeenLocation - GetPawn()->GetActorLocation();
@@ -131,20 +130,21 @@ void ADBEnemyAIController::RefreshCombatState()
 		LastSeenAt = Now;
 	}
 	const bool bCanAct = Enemy && Enemy->CanAct();
-	AActor* VisibleTarget = bHasSight ? TrackedTarget.Get() : nullptr;
 	const auto* Combat = Enemy ? Enemy->FindComponentByClass<UDBCombatComponent>() : nullptr;
-	const bool bInRange = VisibleTarget && Enemy
-	                      && FVector::DistSquared2D(Enemy->GetActorLocation(), VisibleTarget->GetActorLocation())
+	const bool bCommittedAttack = Combat && Combat->IsAttacking();
+	AActor* Target = bHasSight || bCommittedAttack ? TrackedTarget.Get() : nullptr;
+	const bool bInRange = Target && Enemy
+	                      && FVector::DistSquared2D(Enemy->GetActorLocation(), Target->GetActorLocation())
 	                             <= FMath::Square(Enemy->GetAttackRange())
-	                      && FMath::Abs(Enemy->GetActorLocation().Z - VisibleTarget->GetActorLocation().Z) < 100;
+	                      && FMath::Abs(Enemy->GetActorLocation().Z - Target->GetActorLocation().Z) < 100;
 	Blackboard->SetValueAsBool(DBEnemyBB::CanAct, bCanAct);
-	Blackboard->SetValueAsObject(DBEnemyBB::Target, VisibleTarget);
+	Blackboard->SetValueAsObject(DBEnemyBB::Target, Target);
 	Blackboard->SetValueAsVector(DBEnemyBB::LastKnownLocation, LastSeenLocation);
 	Blackboard->SetValueAsBool(
 	    DBEnemyBB::HasLastKnownLocation, TrackedTarget.IsValid() && Now - LastSeenAt < SearchDuration);
-	// Finish a committed swing even if the target steps out of reach; loss/death still aborts it.
+	// Finish the chosen pattern when it misses or leaves sight. Death and interruption still abort it.
 	Blackboard->SetValueAsBool(DBEnemyBB::CanAttack,
-	    bCanAct && VisibleTarget && Combat && (Combat->IsAttacking() || (bInRange && Now >= NextAttackAt)));
+	    bCanAct && Target && Combat && (bCommittedAttack || (bHasSight && bInRange && Now >= NextAttackAt)));
 	if (TrackedTarget.IsValid() && !bHasSight && Now - LastSeenAt >= SearchDuration)
 	{
 		ForgetTarget();

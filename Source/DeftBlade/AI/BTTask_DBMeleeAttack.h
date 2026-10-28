@@ -15,8 +15,10 @@ public:
 	virtual EBTNodeResult::Type ExecuteTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) override;
 
 protected:
+	UPROPERTY(EditAnywhere, Category = "Attack", meta = (ClampMin = "0", ClampMax = "1"))
+	float ComboChance = 0.5f;
+
 	virtual void TickTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory, float DeltaSeconds) override;
-	virtual EBTNodeResult::Type AbortTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory) override;
 	virtual void OnTaskFinished(
 	    UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory, EBTNodeResult::Type Result) override;
 
@@ -24,5 +26,7 @@ private:
 	void CancelOwnedAttack();
 	TWeakObjectPtr<UDBCombatComponent> Combat;
 	uint64 RequestId = 0;
+	double AimStartedAt = 0;
+	bool bComboAttack = false;
 	bool bStarted = false;
 };

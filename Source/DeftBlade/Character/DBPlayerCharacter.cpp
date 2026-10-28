@@ -103,6 +103,13 @@ float ADBPlayerCharacter::TakeDamage(
 	if (Applied > 0.0f)
 	{
 		Super::TakeDamage(Applied, Event, EventInstigator, Causer);
+		if (!HealthComponent->IsDead())
+		{
+			StopJumpMontages();
+			StopJumping();
+			StopSprinting();
+			CombatComponent->ReactToHit(HitReactionMontage);
+		}
 	}
 	return Applied;
 }

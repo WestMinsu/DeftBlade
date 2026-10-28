@@ -1,13 +1,16 @@
 #include "AI/BTTask_DBMeleeAttack.h"
 #include "AI/DBEnemyAIController.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
 #include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "Character/DBEnemyCharacter.h"
 #include "Combat/DBCombatComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 
 UBTTask_DBMeleeAttack::UBTTask_DBMeleeAttack()
 {
-	NodeName = TEXT("Committed melee attack");
+	NodeName = TEXT("Aim and commit sword attack");
 	// Each agent owns its request ID. Asset template nodes must never hold mutable agent state.
 	bCreateNodeInstance = true;
 	bNotifyTick = true;
@@ -36,26 +39,67 @@ EBTNodeResult::Type UBTTask_DBMeleeAttack::ExecuteTask(UBehaviorTreeComponent& O
 		return EBTNodeResult::Failed;
 	}
 	AI->StopMovement();
-	const FVector Direction = Target->GetActorLocation() - Enemy->GetActorLocation();
-	Enemy->SetActorRotation(FRotator(0, Direction.Rotation().Yaw, 0));
-	Combat->RequestAttack(false);
-	RequestId = Combat->GetBufferedAction().Id;
-	return RequestId ? EBTNodeResult::InProgress : EBTNodeResult::Failed;
+	bComboAttack = FMath::FRand() < ComboChance;
+	const FDBAttackDefinition* Attack = Combat->FindAttack(bComboAttack ? EDBAttackId::Heavy1 : EDBAttackId::Light1);
+	if (!Attack || !Attack->IsValid())
+	{
+		return EBTNodeResult::Failed;
+	}
+	AimStartedAt = Enemy->GetWorld()->GetTimeSeconds();
+	return EBTNodeResult::InProgress;
 }
 
-void UBTTask_DBMeleeAttack::TickTask(UBehaviorTreeComponent& OwnerComp, uint8*, float)
+void UBTTask_DBMeleeAttack::TickTask(UBehaviorTreeComponent& OwnerComp, uint8*, float DeltaSeconds)
 {
 	const auto* AI = Cast<ADBEnemyAIController>(OwnerComp.GetAIOwner());
-	const auto* Enemy = AI ? Cast<ADBEnemyCharacter>(AI->GetPawn()) : nullptr;
-	if (!Combat.IsValid() || !Enemy || !Enemy->CanAct())
+	auto* Enemy = AI ? Cast<ADBEnemyCharacter>(AI->GetPawn()) : nullptr;
+	const AActor* Target = AI && AI->GetBlackboardComponent()
+	                           ? Cast<AActor>(AI->GetBlackboardComponent()->GetValueAsObject(DBEnemyBB::Target))
+	                           : nullptr;
+	if (!Combat.IsValid() || !Enemy || !Enemy->CanAct() || !IsValid(Target))
 	{
-		CancelOwnedAttack();
 		FinishLatentTask(OwnerComp, EBTNodeResult::Failed);
+		return;
+	}
+	const FRotator DesiredRotation(0, (Target->GetActorLocation() - Enemy->GetActorLocation()).Rotation().Yaw, 0);
+	auto TurnTowardsTarget = [&]()
+	{
+		Enemy->SetActorRotation(
+		    FMath::RInterpConstantTo(Enemy->GetActorRotation(), DesiredRotation, DeltaSeconds, 360.f));
+	};
+	if (RequestId == 0)
+	{
+		if (Enemy->GetWorld()->GetTimeSeconds() - AimStartedAt > 0.75
+		    || FVector::DistSquared2D(Enemy->GetActorLocation(), Target->GetActorLocation())
+		           > FMath::Square(Enemy->GetAttackRange()))
+		{
+			FinishLatentTask(OwnerComp, EBTNodeResult::Failed);
+			return;
+		}
+		TurnTowardsTarget();
+		if (FMath::Abs(FMath::FindDeltaAngleDegrees(Enemy->GetActorRotation().Yaw, DesiredRotation.Yaw)) <= 15.0)
+		{
+			Combat->RequestAttack(bComboAttack);
+			RequestId = Combat->GetBufferedAction().Id;
+			if (!RequestId)
+			{
+				FinishLatentTask(OwnerComp, EBTNodeResult::Failed);
+			}
+		}
 		return;
 	}
 	if (Combat->GetActiveActionId() == RequestId)
 	{
 		bStarted = true;
+		const FDBAttackDefinition* Attack = Combat->FindAttack(Combat->GetAttackId());
+		UAnimInstance* Anim = Enemy->GetMesh()->GetAnimInstance();
+		// Track during the visible preparation, then commit the whole pattern before its first hit.
+		if (Attack && Anim
+		    && Anim->Montage_GetPosition(Attack->Montage)
+		           < Attack->HitWindows[0].Start - 0.10f * Attack->PlayRate * Attack->Montage->RateScale)
+		{
+			TurnTowardsTarget();
+		}
 		return;
 	}
 	if (Combat->GetBufferedAction().Id == RequestId)
@@ -78,12 +122,6 @@ void UBTTask_DBMeleeAttack::CancelOwnedAttack()
 			Combat->FinishAction(RequestId);
 		}
 	}
-}
-
-EBTNodeResult::Type UBTTask_DBMeleeAttack::AbortTask(UBehaviorTreeComponent&, uint8*)
-{
-	CancelOwnedAttack();
-	return EBTNodeResult::Aborted;
 }
 
 void UBTTask_DBMeleeAttack::OnTaskFinished(UBehaviorTreeComponent& OwnerComp, uint8* Memory, EBTNodeResult::Type Result)
