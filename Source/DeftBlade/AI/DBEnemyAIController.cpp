@@ -6,6 +6,7 @@
 #include "Character/DBPlayerCharacter.h"
 #include "Combat/DBCombatComponent.h"
 #include "Combat/DBHealthComponent.h"
+#include "NavigationSystem.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
 
@@ -18,6 +19,9 @@ ADBEnemyAIController::ADBEnemyAIController()
 	SightConfig->SightRadius = 1400;
 	SightConfig->LoseSightRadius = 1700;
 	SightConfig->PeripheralVisionAngleDegrees = 80;
+	// Keep nearby jumps inside the sight cone without bypassing line-of-sight checks.
+	SightConfig->PointOfViewBackwardOffset = 100;
+	SightConfig->NearClippingRadius = 100;
 	SightConfig->SetMaxAge(5);
 	SightConfig->DetectionByAffiliation.bDetectEnemies = true;
 	SightConfig->DetectionByAffiliation.bDetectNeutrals = true;
@@ -135,11 +139,25 @@ void ADBEnemyAIController::RefreshCombatState()
 	AActor* Target = bHasSight || bCommittedAttack ? TrackedTarget.Get() : nullptr;
 	const bool bInRange = Target && Enemy
 	                      && FVector::DistSquared2D(Enemy->GetActorLocation(), Target->GetActorLocation())
-	                             <= FMath::Square(Enemy->GetAttackRange())
-	                      && FMath::Abs(Enemy->GetActorLocation().Z - Target->GetActorLocation().Z) < 100;
+	                             <= FMath::Square(Enemy->GetAttackRange());
+	FVector MoveGoal = LastSeenLocation;
+	if (Enemy && TrackedTarget.IsValid())
+	{
+		if (auto* Navigation = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
+		{
+			FNavLocation GroundGoal;
+			// Default projection height does not reach the floor during a double jump.
+			if (Navigation->ProjectPointToNavigation(
+			        LastSeenLocation, GroundGoal, FVector(50, 50, 1000), &Enemy->GetNavAgentPropertiesRef()))
+			{
+				MoveGoal = GroundGoal.Location;
+			}
+		}
+	}
+	// Activating a BT branch can start MoveTo immediately; publish its goal first.
+	Blackboard->SetValueAsVector(DBEnemyBB::LastKnownLocation, MoveGoal);
 	Blackboard->SetValueAsBool(DBEnemyBB::CanAct, bCanAct);
 	Blackboard->SetValueAsObject(DBEnemyBB::Target, Target);
-	Blackboard->SetValueAsVector(DBEnemyBB::LastKnownLocation, LastSeenLocation);
 	Blackboard->SetValueAsBool(
 	    DBEnemyBB::HasLastKnownLocation, TrackedTarget.IsValid() && Now - LastSeenAt < SearchDuration);
 	// Finish the chosen pattern when it misses or leaves sight. Death and interruption still abort it.
