@@ -45,6 +45,7 @@ void ADBEnemyCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	CombatComponent->SetWeaponMesh(WeaponMesh);
+	CombatComponent->OnParried.AddUObject(this, &ThisClass::ReactToParry);
 	HealthComponent->OnHealthChanged.AddUObject(this, &ThisClass::UpdateHealthText);
 	HealthComponent->OnDeath.AddUObject(this, &ThisClass::HandleDeath);
 	UpdateHealthText(HealthComponent->GetHealth(), HealthComponent->GetMaxHealth());
@@ -85,21 +86,31 @@ float ADBEnemyCharacter::TakeDamage(
 	{
 		return Applied;
 	}
+	PlayHitReaction(EventInstigator ? EventInstigator->GetPawn() : Causer, HitReactionMontage);
+	return Applied;
+}
+
+void ADBEnemyCharacter::ReactToParry(AActor* Defender)
+{
+	PlayHitReaction(Defender, ParryReactionMontage ? ParryReactionMontage : HitReactionMontage);
+}
+
+void ADBEnemyCharacter::PlayHitReaction(AActor* Attacker, UAnimMontage* Montage)
+{
 	CombatComponent->ResetCombat();
 	if (auto* AI = Cast<ADBEnemyAIController>(GetController()))
 	{
 		AI->StopMovement();
-		AI->RememberAttacker(EventInstigator ? EventInstigator->GetPawn() : Causer);
+		AI->RememberAttacker(Attacker);
 	}
 	const double FallingSpeed = GetCharacterMovement()->IsFalling() ? GetVelocity().Z : 0.0;
 	GetCharacterMovement()->StopMovementImmediately();
 	GetCharacterMovement()->Velocity.Z = FallingSpeed;
 	StopReaction();
-	if (UAnimInstance* Anim = GetMesh()->GetAnimInstance(); Anim && GetCharacterMovement()->IsMovingOnGround()
-	                                                        && HitReactionMontage
-	                                                        && Anim->Montage_Play(HitReactionMontage) > 0)
+	if (UAnimInstance* Anim = GetMesh()->GetAnimInstance();
+	    Anim && GetCharacterMovement()->IsMovingOnGround() && Montage && Anim->Montage_Play(Montage) > 0)
 	{
-		auto* Instance = Anim->GetActiveInstanceForMontage(HitReactionMontage);
+		auto* Instance = Anim->GetActiveInstanceForMontage(Montage);
 		ReactionInstanceId = Instance->GetInstanceID();
 		Instance->OnMontageEnded.BindUObject(this, &ThisClass::ReactionEnded, ReactionInstanceId);
 	}
@@ -107,7 +118,6 @@ float ADBEnemyCharacter::TakeDamage(
 	{
 		AI->RefreshCombatState();
 	}
-	return Applied;
 }
 
 void ADBEnemyCharacter::StopReaction()
@@ -117,7 +127,7 @@ void ADBEnemyCharacter::StopReaction()
 		if (auto* Instance = Anim->GetMontageInstanceForID(ReactionInstanceId))
 		{
 			Instance->OnMontageEnded.Unbind();
-			Anim->Montage_Stop(0.08f, HitReactionMontage);
+			Anim->Montage_Stop(0.08f, Instance->Montage);
 		}
 	}
 	ReactionInstanceId = INDEX_NONE;

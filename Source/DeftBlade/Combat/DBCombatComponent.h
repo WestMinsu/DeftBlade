@@ -7,6 +7,8 @@
 class ACharacter;
 class UAnimMontage;
 class UCurveFloat;
+class UParticleSystem;
+class USoundBase;
 class UStaticMeshComponent;
 
 UENUM(BlueprintType)
@@ -115,6 +117,10 @@ struct FDBAttackDefinition
 	UPROPERTY(EditAnywhere)
 	TArray<FDBAttackWindow> HitWindows = {FDBAttackWindow()};
 
+	/** Empty [0, 0) disables parrying. One frontal melee contact per attack. */
+	UPROPERTY(EditAnywhere)
+	FDBAttackWindow ParryWindow = {0.0f, 0.0f};
+
 	/** Earliest next attack; always after this motion's last hit window. */
 	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"))
 	float ComboStart = 0.65f;
@@ -137,6 +143,7 @@ struct FDBAttackDefinition
 
 DECLARE_MULTICAST_DELEGATE_TwoParams(FDBAttackWindowTraversed, float, float);
 DECLARE_MULTICAST_DELEGATE(FDBAttackStarted);
+DECLARE_MULTICAST_DELEGATE_OneParam(FDBParried, AActor*);
 
 /** Owns action lifetime, one buffered input and finite ground/air evades. */
 UCLASS(ClassGroup = (DeftBlade), meta = (BlueprintSpawnableComponent))
@@ -199,6 +206,8 @@ public:
 	FDBAttackWindowTraversed OnAttackWindowTraversed;
 	/** Accepted montage start, including buffered combo links; before the initial blade snapshot. */
 	FDBAttackStarted OnAttackStarted;
+	/** This attacker was parried by the supplied defender. */
+	FDBParried OnParried;
 
 protected:
 	virtual void BeginPlay() override;
@@ -212,6 +221,12 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Attack")
 	TArray<FDBAttackDefinition> Attacks;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Parry")
+	TObjectPtr<UParticleSystem> ParryEffect;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Parry")
+	TObjectPtr<USoundBase> ParrySound;
 
 	/** Attack exits the evade after its fixed i-frame interval. */
 	UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0"))
@@ -303,7 +318,8 @@ private:
 	FTransform SampleWeaponTransform(
 	    float Position, float CurrentPosition, const FTransform& CurrentMesh, const FTransform& CurrentWeapon) const;
 	void TraceAttack(float Previous, float Current, const FTransform& CurrentMesh, const FTransform& CurrentWeapon);
-	void SweepBlade(const FTransform& From, const FTransform& To, uint64 ActionId);
+	void SweepBlade(const FTransform& From, const FTransform& To, uint64 ActionId, double FromTime, double ToTime);
+	bool TryParry(UDBCombatComponent& Attacker, double ContactTime, const FVector& ImpactPoint);
 	void UpdateEvadeMovement(float DeltaTime);
 	bool IsEvadeMontageActive() const;
 	void StopEvadeMovement(bool bStopHorizontalVelocity = true);
@@ -326,6 +342,7 @@ private:
 	bool bBackwardEvade = false;
 	bool bAirEvadeUsed = false;
 	bool bAirLightComboUsed = false;
+	bool bParryUsed = false;
 	UPROPERTY(Transient)
 	FDBAttackDefinition ActiveAttack;
 	int32 ActiveHitWindow = INDEX_NONE;

@@ -48,10 +48,14 @@ protected:
 	float AttackRange = 170.0f;
 	UPROPERTY(EditDefaultsOnly, Category = "Animation")
 	TObjectPtr<UAnimMontage> HitReactionMontage;
+	UPROPERTY(EditDefaultsOnly, Category = "Animation")
+	TObjectPtr<UAnimMontage> ParryReactionMontage;
 
 private:
 	void UpdateHealthText(float Current, float Maximum);
 	void HandleDeath();
+	void ReactToParry(AActor* Defender);
+	void PlayHitReaction(AActor* Attacker, UAnimMontage* Montage);
 	void StopReaction();
 	void ReactionEnded(UAnimMontage* Montage, bool bInterrupted, int32 InstanceId);
 	int32 ReactionInstanceId = INDEX_NONE;
