@@ -86,6 +86,14 @@ float ADBEnemyCharacter::TakeDamage(
 	{
 		return Applied;
 	}
+	const auto* AttackerCombat = Causer ? Causer->FindComponentByClass<UDBCombatComponent>() : nullptr;
+	const EDBAttackId Attack = AttackerCombat ? AttackerCombat->GetAttackId() : EDBAttackId::None;
+	const bool bForceReaction = Attack == EDBAttackId::Launcher || Attack == EDBAttackId::AirHeavy;
+	if (!bForceReaction && GetCharacterMovement()->IsMovingOnGround()
+	    && (ReactionInstanceId != INDEX_NONE || GetWorld()->GetTimeSeconds() < NextHitReactionAt))
+	{
+		return Applied;
+	}
 	PlayHitReaction(EventInstigator ? EventInstigator->GetPawn() : Causer, HitReactionMontage);
 	return Applied;
 }
@@ -140,6 +148,7 @@ void ADBEnemyCharacter::ReactionEnded(UAnimMontage*, bool, int32 InstanceId)
 		return;
 	}
 	ReactionInstanceId = INDEX_NONE;
+	NextHitReactionAt = GetWorld()->GetTimeSeconds() + HitReactionCooldown;
 	if (auto* AI = Cast<ADBEnemyAIController>(GetController()))
 	{
 		AI->RefreshCombatState();
