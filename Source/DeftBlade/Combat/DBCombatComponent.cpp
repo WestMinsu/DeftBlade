@@ -13,6 +13,7 @@
 #include "Curves/CurveFloat.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/LocalPlayer.h"
+#include "Engine/OverlapResult.h"
 #include "Engine/World.h"
 #include "Engine/SkeletalMeshSocket.h"
 #include "Engine/StaticMesh.h"
@@ -57,11 +58,17 @@ bool FDBAttackDefinition::IsValid() const
 	    || ComboStart >= Montage->GetPlayLength() || !FMath::IsFinite(EvadeCancelStart) || EvadeCancelStart < 0.0f
 	    || EvadeCancelStart >= Montage->GetPlayLength() || !FMath::IsFinite(JumpCancelStart)
 	    || JumpCancelStart >= Montage->GetPlayLength() || !FMath::IsFinite(MoveCancelStart)
-	    || MoveCancelStart >= Montage->GetPlayLength() || !FMath::IsFinite(ParryWindow.Start)
-	    || !FMath::IsFinite(ParryWindow.End) || ParryWindow.Start < 0.0f || ParryWindow.End < ParryWindow.Start
-	    || ParryWindow.End > ComboStart)
+	    || MoveCancelStart >= Montage->GetPlayLength())
 	{
 		return false;
+	}
+	for (const FDBAttackWindow& Window : {ParryWindow, StaggerResistanceWindow})
+	{
+		if (!FMath::IsFinite(Window.Start) || !FMath::IsFinite(Window.End) || Window.Start < 0.0f
+		    || Window.End < Window.Start || Window.End > ComboStart)
+		{
+			return false;
+		}
 	}
 	float PreviousEnd = 0.0f;
 	for (const FDBAttackWindow& Window : HitWindows)
@@ -326,6 +333,10 @@ void UDBCombatComponent::TickComponent(
     float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	if (ParryHitStopEndsAt != 0.0 && FPlatformTime::Seconds() >= ParryHitStopEndsAt)
+	{
+		StopParryHitStop();
+	}
 	if (!CanProcessInput())
 	{
 		ResetCombat();
@@ -799,6 +810,8 @@ void UDBCombatComponent::TryStartAttack()
 	}
 	PreviousMeshTransform = Character->GetMesh()->GetComponentTransform();
 	PreviousWeaponTransform = GetWeaponTransform();
+	EarlierWeaponTransform = PreviousWeaponTransform;
+	WeaponPoseTime = EarlierWeaponTime = ActionStartedAt;
 }
 
 void UDBCombatComponent::SampleAttackWindow(float Position)
@@ -1054,7 +1067,10 @@ void UDBCombatComponent::BonesFinalized()
 		return;
 	}
 	PreviousMeshTransform = CurrentMesh;
+	EarlierWeaponTransform = PreviousWeaponTransform;
+	EarlierWeaponTime = WeaponPoseTime;
 	PreviousWeaponTransform = CurrentWeapon;
+	WeaponPoseTime = GetWorld()->GetTimeSeconds();
 	// Flush this frame's contacts before changing the montage or resetting its per-swing hit set.
 	if (BufferedAction.Id != 0 && IsAttackInput(BufferedAction.Input) && Position >= ActiveAttack.ComboStart)
 	{
@@ -1078,40 +1094,117 @@ void UDBCombatComponent::TraceAttack(
 	if (ActiveAttack.Id == EDBAttackId::AirHeavy && FMath::IsNearlyEqual(Previous, Current) && IsAttackWindowOpen())
 	{
 		// Montage time is held, but CMC is still moving the blade through the world.
-		SweepBlade(PreviousWeaponTransform, CurrentWeapon, ActionId, Now - GetWorld()->GetDeltaSeconds(), Now);
+		if (!SweepParry(
+		        PreviousWeaponTransform, CurrentWeapon, Now - GetWorld()->GetDeltaSeconds(), Now, ActiveHitWindow))
+		{
+			SweepBlade(PreviousWeaponTransform, CurrentWeapon, ActionId);
+		}
 		return;
 	}
 	for (int32 Index = 0; Index < ActiveAttack.HitWindows.Num() && ActiveActionId == ActionId; ++Index)
 	{
 		const FDBAttackWindow Window = ActiveAttack.HitWindows[Index];
-		if (!Window.Overlaps(Previous, Current))
+		// A weapon clash may catch the final 0.10 seconds of preparation; damage still starts at Window.Start.
+		const double Rate = ActiveAttack.PlayRate * ActiveAttack.Montage->RateScale;
+		const float ClashStart = FMath::Max(0.0f, Window.Start - 0.10f * Rate);
+		if (!FDBAttackWindow{ClashStart, Window.End}.Overlaps(Previous, Current))
 		{
 			continue;
 		}
-		if (ActiveHitWindow != Index)
-		{
-			HitActors.Reset();
-			ActiveHitWindow = Index;
-		}
-		const float From = FMath::Max(Previous, Window.Start);
+		const float From = FMath::Max(Previous, ClashStart);
 		const float To = FMath::Min(Current, Window.End);
 		const int32 Steps = FMath::Clamp(FMath::CeilToInt((To - From) * 120.0f), 1, 32);
 		FTransform Last = SampleWeaponTransform(From, Current, CurrentMesh, CurrentWeapon);
-		const double Rate = ActiveAttack.PlayRate * ActiveAttack.Montage->RateScale;
 		double LastTime = Now - (Current - From) / Rate;
+		float LastPosition = From;
 		for (int32 Step = 1; Step <= Steps && ActiveActionId == ActionId; ++Step)
 		{
 			const float Time = FMath::Lerp(From, To, static_cast<float>(Step) / Steps);
 			const FTransform Next = SampleWeaponTransform(Time, Current, CurrentMesh, CurrentWeapon);
 			const double NextTime = Now - (Current - Time) / Rate;
-			SweepBlade(Last, Next, ActionId, LastTime, NextTime);
+			if (SweepParry(Last, Next, LastTime, NextTime, Index))
+			{
+				return;
+			}
+			if (Time > Window.Start)
+			{
+				if (ActiveHitWindow != Index)
+				{
+					HitActors.Reset();
+					ActiveHitWindow = Index;
+				}
+				const float DamageStart = FMath::Max(LastPosition, Window.Start);
+				const FTransform DamageFrom = DamageStart == LastPosition ? Last
+				                                                          : SampleWeaponTransform(DamageStart, Current,
+				                                                                CurrentMesh, CurrentWeapon);
+				SweepBlade(DamageFrom, Next, ActionId);
+			}
 			Last = Next;
 			LastTime = NextTime;
+			LastPosition = Time;
 		}
 	}
 }
 
-bool UDBCombatComponent::TryParry(UDBCombatComponent& Attacker, double ContactTime, const FVector& ImpactPoint)
+bool UDBCombatComponent::HasAttackStaggerResistance() const
+{
+	if (!IsAttacking() || !CanProcessInput()
+	    || !CastChecked<ACharacter>(GetOwner())->GetCharacterMovement()->IsMovingOnGround())
+	{
+		return false;
+	}
+	// Use the action clock; the opponent's pose may finalize earlier in this frame.
+	const double Position =
+	    (GetWorld()->GetTimeSeconds() - ActionStartedAt) * ActiveAttack.PlayRate * ActiveAttack.Montage->RateScale;
+	return Position >= ActiveAttack.StaggerResistanceWindow.Start
+	       && Position < ActiveAttack.StaggerResistanceWindow.End;
+}
+
+bool UDBCombatComponent::SweepParry(
+    const FTransform& From, const FTransform& To, double FromTime, double ToTime, int32 HitWindow)
+{
+	const FVector FromBase = From.TransformPosition(BladeBaseLocal);
+	const FVector FromTip = From.TransformPosition(BladeTipLocal);
+	const FVector ToBase = To.TransformPosition(BladeBaseLocal);
+	const FVector ToTip = To.TransformPosition(BladeTipLocal);
+	// Broad phase only: a candidate's hand and sword can extend beyond its body capsule.
+	const float Radius =
+	    200.0f + FMath::Max(FVector::Distance(FromBase, FromTip), FVector::Distance(ToBase, ToTip)) * 0.5f;
+	const FVector FromCenter = (FromBase + FromTip) * 0.5f;
+	const FVector ToCenter = (ToBase + ToTip) * 0.5f;
+	TArray<FOverlapResult> Candidates;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(DBParry), false, GetOwner());
+	GetWorld()->OverlapMultiByObjectType(Candidates, (FromCenter + ToCenter) * 0.5f, FQuat::Identity,
+	    FCollisionObjectQueryParams(ECC_Pawn),
+	    FCollisionShape::MakeSphere(Radius + FVector::Distance(FromCenter, ToCenter) * 0.5f), Params);
+	const auto* Team = Cast<IGenericTeamAgentInterface>(CastChecked<ACharacter>(GetOwner())->GetController());
+	for (const FOverlapResult& Candidate : Candidates)
+	{
+		AActor* Target = Candidate.GetActor();
+		if (!IsValid(Target) || (ActiveHitWindow == HitWindow && HitActors.Contains(Target))
+		    || (Team && Team->GetTeamAttitudeTowards(*Target) != ETeamAttitude::Hostile))
+		{
+			continue;
+		}
+		UDBCombatComponent* Defender = Target->FindComponentByClass<UDBCombatComponent>();
+		if (!Defender || !Defender->IsAttacking() || Defender->ActiveAttack.ParryWindow.End <= 0)
+		{
+			continue;
+		}
+		for (float Alpha : {0.0f, 0.5f, 1.0f})
+		{
+			if (Defender->TryParry(*this, FMath::Lerp(FromTime, ToTime, Alpha), FMath::Lerp(FromBase, ToBase, Alpha),
+			        FMath::Lerp(FromTip, ToTip, Alpha)))
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+bool UDBCombatComponent::TryParry(
+    UDBCombatComponent& Attacker, double ContactTime, const FVector& BladeBase, const FVector& BladeTip)
 {
 	if (!IsAttacking() || bParryUsed || !CanProcessInput() || !GetOwner()->CanBeDamaged()
 	    || !IsAttackMovementValid(ActiveAttack.Id))
@@ -1127,13 +1220,34 @@ bool UDBCombatComponent::TryParry(UDBCombatComponent& Attacker, double ContactTi
 	{
 		return false;
 	}
-	bParryUsed = true;
-	const uint64 AttackerActionId = Attacker.ActiveActionId;
-	Attacker.OnParried.Broadcast(GetOwner());
-	if (Attacker.ActiveActionId == AttackerActionId)
+	FTransform Weapon = GetWeaponTransform();
+	if (WeaponPoseTime > EarlierWeaponTime)
 	{
-		Attacker.ResetCombat();
+		// Compare both blades at the swept sample's time, rather than mixing two animation frames.
+		const float Alpha =
+		    FMath::Clamp((ContactTime - EarlierWeaponTime) / (WeaponPoseTime - EarlierWeaponTime), 0.0, 1.0);
+		Weapon.Blend(EarlierWeaponTransform, PreviousWeaponTransform, Alpha);
 	}
+	FVector IncomingPoint, DefenderPoint;
+	FMath::SegmentDistToSegmentSafe(BladeBase, BladeTip, Weapon.TransformPosition(BladeBaseLocal),
+	    Weapon.TransformPosition(BladeTipLocal), IncomingPoint, DefenderPoint);
+	const float Separation = ParryBladeTolerance + BladeTraceRadius + Attacker.BladeTraceRadius;
+	if (FVector::DistSquared(IncomingPoint, DefenderPoint) > FMath::Square(Separation))
+	{
+		return false;
+	}
+	const FVector ImpactPoint = (IncomingPoint + DefenderPoint) * 0.5f;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(DBParrySight), false, GetOwner());
+	Params.AddIgnoredActor(Attacker.GetOwner());
+	FHitResult Obstruction;
+	if (GetWorld()->LineTraceSingleByChannel(
+	        Obstruction, GetOwner()->GetActorLocation(), ImpactPoint, DBCollision::Melee, Params)
+	    || GetWorld()->LineTraceSingleByChannel(
+	        Obstruction, Attacker.GetOwner()->GetActorLocation(), ImpactPoint, DBCollision::Melee, Params))
+	{
+		return false;
+	}
+	bParryUsed = true;
 	if (ParryEffect)
 	{
 		UGameplayStatics::SpawnEmitterAtLocation(GetWorld(), ParryEffect, ImpactPoint);
@@ -1142,11 +1256,35 @@ bool UDBCombatComponent::TryParry(UDBCombatComponent& Attacker, double ContactTi
 	{
 		UGameplayStatics::PlaySoundAtLocation(this, ParrySound, ImpactPoint);
 	}
+	if (ParryHitStopDuration > 0.0f)
+	{
+		TimeDilationBeforeParry = UGameplayStatics::GetGlobalTimeDilation(this);
+		UGameplayStatics::SetGlobalTimeDilation(this, FMath::Min(TimeDilationBeforeParry, 0.05f));
+		ParryHitStopEndsAt = FPlatformTime::Seconds() + ParryHitStopDuration;
+	}
+	const uint64 AttackerActionId = Attacker.ActiveActionId;
+	Attacker.OnParried.Broadcast(GetOwner());
+	if (Attacker.ActiveActionId == AttackerActionId)
+	{
+		Attacker.ResetCombat();
+	}
 	return true;
 }
 
-void UDBCombatComponent::SweepBlade(
-    const FTransform& From, const FTransform& To, uint64 ActionId, double FromTime, double ToTime)
+void UDBCombatComponent::StopParryHitStop()
+{
+	if (ParryHitStopEndsAt != 0.0)
+	{
+		ParryHitStopEndsAt = 0.0;
+		if (FMath::IsNearlyEqual(
+		        UGameplayStatics::GetGlobalTimeDilation(this), FMath::Min(TimeDilationBeforeParry, 0.05f)))
+		{
+			UGameplayStatics::SetGlobalTimeDilation(this, TimeDilationBeforeParry);
+		}
+	}
+}
+
+void UDBCombatComponent::SweepBlade(const FTransform& From, const FTransform& To, uint64 ActionId)
 {
 	const double Length = FMath::Max(From.TransformVector(BladeTipLocal - BladeBaseLocal).Size(),
 	    To.TransformVector(BladeTipLocal - BladeBaseLocal).Size());
@@ -1190,17 +1328,14 @@ void UDBCombatComponent::SweepBlade(
 			}
 			// One contact attempt per actor/window, even when that target rejects it via i-frames.
 			HitActors.Add(Target);
-			if (UDBCombatComponent* Defender = Target->FindComponentByClass<UDBCombatComponent>();
-			    Defender && Defender->TryParry(*this, FMath::Lerp(FromTime, ToTime, Hit.Time), Hit.ImpactPoint))
-			{
-				return;
-			}
+			UDBCombatComponent* VictimCombat = Target->FindComponentByClass<UDBCombatComponent>();
+			const bool bResistsLaunch = VictimCombat && VictimCombat->HasAttackStaggerResistance();
 			const EDBAttackId Attack = ActiveAttack.Id;
 			const float Applied = UGameplayStatics::ApplyPointDamage(Target, ActiveAttack.Damage,
 			    (To.TransformPosition(Local) - From.TransformPosition(Local)).GetSafeNormal(), Hit,
 			    CastChecked<ACharacter>(GetOwner())->GetController(), GetOwner(), nullptr);
 			ACharacter* Victim = Cast<ACharacter>(Target);
-			if (Applied > 0.0f && IsValid(Victim) && !Health->IsDead() && ActiveActionId == ActionId)
+			if (Applied > 0.0f && IsValid(Victim) && !Health->IsDead() && ActiveActionId == ActionId && !bResistsLaunch)
 			{
 				if (Attack == EDBAttackId::Launcher)
 				{
@@ -1214,7 +1349,7 @@ void UDBCombatComponent::SweepBlade(
 					}
 					else if (IsAirLight(Attack))
 					{
-						if (UDBCombatComponent* VictimCombat = Victim->FindComponentByClass<UDBCombatComponent>())
+						if (VictimCombat)
 						{
 							VictimCombat->HoldAirborne(CastChecked<ACharacter>(GetOwner()));
 						}
@@ -1269,6 +1404,7 @@ void UDBCombatComponent::StopEvadeMontage()
 
 void UDBCombatComponent::ResetCombat()
 {
+	StopParryHitStop();
 	if (ActiveActionId != 0 || BufferedAction.Id != 0)
 	{
 		UE_LOG(LogDBCombat, Verbose, TEXT("%s reset active #%llu / pending #%llu"), *GetOwner()->GetName(),

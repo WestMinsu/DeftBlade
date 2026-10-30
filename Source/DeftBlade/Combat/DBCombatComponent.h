@@ -117,9 +117,13 @@ struct FDBAttackDefinition
 	UPROPERTY(EditAnywhere)
 	TArray<FDBAttackWindow> HitWindows = {FDBAttackWindow()};
 
-	/** Empty [0, 0) disables parrying. One frontal melee contact per attack. */
+	/** Empty [0, 0) disables parrying. One frontal weapon clash per attack. */
 	UPROPERTY(EditAnywhere)
 	FDBAttackWindow ParryWindow = {0.0f, 0.0f};
+
+	/** Damage still applies; this interval resists flinch and forced launch. Empty disables it. */
+	UPROPERTY(EditAnywhere)
+	FDBAttackWindow StaggerResistanceWindow = {0.0f, 0.0f};
 
 	/** Earliest next attack; always after this motion's last hit window. */
 	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"))
@@ -201,6 +205,7 @@ public:
 		return ActionState == EDBActionState::LightAttack || ActionState == EDBActionState::HeavyAttack;
 	}
 	bool IsAttackWindowOpen() const;
+	bool HasAttackStaggerResistance() const;
 	const FDBAttackDefinition* FindAttack(EDBAttackId Id) const;
 	/** Swept montage-time interval; a long frame crossing the whole window still emits once. */
 	FDBAttackWindowTraversed OnAttackWindowTraversed;
@@ -227,6 +232,14 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Parry")
 	TObjectPtr<USoundBase> ParrySound;
+
+	/** Extra separation allowed between the two blades, in centimeters. */
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Parry", meta = (ClampMin = "0"))
+	float ParryBladeTolerance = 30.0f;
+
+	/** Real seconds; game time, movement and both animations slow together. */
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Parry", meta = (ClampMin = "0", ClampMax = "0.1"))
+	float ParryHitStopDuration = 0.045f;
 
 	/** Attack exits the evade after its fixed i-frame interval. */
 	UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0"))
@@ -318,8 +331,10 @@ private:
 	FTransform SampleWeaponTransform(
 	    float Position, float CurrentPosition, const FTransform& CurrentMesh, const FTransform& CurrentWeapon) const;
 	void TraceAttack(float Previous, float Current, const FTransform& CurrentMesh, const FTransform& CurrentWeapon);
-	void SweepBlade(const FTransform& From, const FTransform& To, uint64 ActionId, double FromTime, double ToTime);
-	bool TryParry(UDBCombatComponent& Attacker, double ContactTime, const FVector& ImpactPoint);
+	void SweepBlade(const FTransform& From, const FTransform& To, uint64 ActionId);
+	bool SweepParry(const FTransform& From, const FTransform& To, double FromTime, double ToTime, int32 HitWindow);
+	bool TryParry(UDBCombatComponent& Attacker, double ContactTime, const FVector& BladeBase, const FVector& BladeTip);
+	void StopParryHitStop();
 	void UpdateEvadeMovement(float DeltaTime);
 	bool IsEvadeMontageActive() const;
 	void StopEvadeMovement(bool bStopHorizontalVelocity = true);
@@ -354,11 +369,16 @@ private:
 	FDelegateHandle PoseFinalizedHandle;
 	FTransform PreviousMeshTransform;
 	FTransform PreviousWeaponTransform;
+	FTransform EarlierWeaponTransform;
+	double WeaponPoseTime = 0.0;
+	double EarlierWeaponTime = 0.0;
 	FVector BladeBaseLocal = FVector::ZeroVector;
 	FVector BladeTipLocal = FVector::ZeroVector;
 	TSet<TWeakObjectPtr<AActor>> HitActors;
 	bool bAttackEndedPending = false;
 	double GroundJumpPressedAt = -1.0;
+	double ParryHitStopEndsAt = 0.0;
+	float TimeDilationBeforeParry = 1.0f;
 	bool bAttackMovementStarted = false;
 	bool bAttackLanded = false;
 };

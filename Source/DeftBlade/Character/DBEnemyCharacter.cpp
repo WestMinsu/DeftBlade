@@ -86,6 +86,10 @@ float ADBEnemyCharacter::TakeDamage(
 	{
 		return Applied;
 	}
+	if (CombatComponent->HasAttackStaggerResistance())
+	{
+		return Applied;
+	}
 	const auto* AttackerCombat = Causer ? Causer->FindComponentByClass<UDBCombatComponent>() : nullptr;
 	const EDBAttackId Attack = AttackerCombat ? AttackerCombat->GetAttackId() : EDBAttackId::None;
 	const bool bForceReaction = Attack == EDBAttackId::Launcher || Attack == EDBAttackId::AirHeavy;
