@@ -41,10 +41,16 @@ ADBEnemyCharacter::ADBEnemyCharacter()
 	HealthText->SetTextRenderColor(FColor(255, 85, 65));
 }
 
+void ADBEnemyCharacter::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	CombatComponent->InitializeWeapon(WeaponMesh);
+}
+
 void ADBEnemyCharacter::BeginPlay()
 {
 	Super::BeginPlay();
-	CombatComponent->SetWeaponMesh(WeaponMesh);
+	CombatComponent->InitializeWeapon(WeaponMesh);
 	CombatComponent->OnParried.AddUObject(this, &ThisClass::ReactToParry);
 	HealthComponent->OnHealthChanged.AddUObject(this, &ThisClass::UpdateHealthText);
 	HealthComponent->OnDeath.AddUObject(this, &ThisClass::HandleDeath);

@@ -29,6 +29,7 @@ public:
 	    AActor* DamageCauser) override;
 
 protected:
+	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 	virtual bool CanJumpWhileFalling() const override;

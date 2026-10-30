@@ -65,10 +65,16 @@ ADBPlayerCharacter::ADBPlayerCharacter()
 	WeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
+void ADBPlayerCharacter::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	CombatComponent->InitializeWeapon(WeaponMesh);
+}
+
 void ADBPlayerCharacter::BeginPlay()
 {
 	Super::BeginPlay();
-	CombatComponent->SetWeaponMesh(WeaponMesh);
+	CombatComponent->InitializeWeapon(WeaponMesh);
 	CombatComponent->OnAttackStarted.AddUObject(this, &ThisClass::AssistAttackFacing);
 	HealthComponent->OnDeath.AddUObject(this, &ThisClass::HandleDeath);
 	ResetMovementInput();

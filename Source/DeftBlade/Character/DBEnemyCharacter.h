@@ -30,6 +30,7 @@ public:
 	}
 
 protected:
+	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 	virtual void OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode) override;

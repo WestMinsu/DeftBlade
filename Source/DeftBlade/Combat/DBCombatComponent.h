@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Combat/DBWeaponData.h"
 #include "DBCombatComponent.generated.h"
 
 class ACharacter;
@@ -33,27 +34,6 @@ enum class EDBActionInput : uint8
 	Launcher
 };
 
-UENUM(BlueprintType)
-enum class EDBAttackId : uint8
-{
-	None,
-	Light1,
-	Light2,
-	Light3,
-	Light4,
-	Heavy1,
-	Heavy2,
-	Heavy3,
-	Heavy4,
-	Light1Heavy,
-	Light2Heavy,
-	AirLight1,
-	AirLight2,
-	AirLight3,
-	Launcher,
-	AirHeavy
-};
-
 /** One pending action request. Id == 0 means the slot is empty. */
 USTRUCT()
 struct FDBBufferedAction
@@ -75,76 +55,6 @@ struct FDBBufferedAction
 	}
 };
 
-/** Times are montage seconds, independent of playback rate. */
-USTRUCT(BlueprintType)
-struct FDBAttackWindow
-{
-	GENERATED_BODY()
-
-	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"))
-	float Start = 0.15f;
-
-	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"))
-	float End = 0.35f;
-
-	bool Overlaps(float Previous, float Current) const
-	{
-		return Current > Previous && Previous < End && Current > Start;
-	}
-};
-
-USTRUCT(BlueprintType)
-struct FDBAttackDefinition
-{
-	GENERATED_BODY()
-
-	UPROPERTY(EditAnywhere)
-	EDBAttackId Id = EDBAttackId::None;
-
-	UPROPERTY(EditAnywhere)
-	EDBAttackId NextLight = EDBAttackId::None;
-
-	UPROPERTY(EditAnywhere)
-	EDBAttackId NextHeavy = EDBAttackId::None;
-
-	UPROPERTY(EditAnywhere)
-	TObjectPtr<UAnimMontage> Montage;
-
-	UPROPERTY(EditAnywhere, meta = (ClampMin = "0.01"))
-	float PlayRate = 1.0f;
-
-	/** Separate swings in one motion may each damage the same target once. */
-	UPROPERTY(EditAnywhere)
-	TArray<FDBAttackWindow> HitWindows = {FDBAttackWindow()};
-
-	/** Empty [0, 0) disables parrying. One frontal weapon clash per attack. */
-	UPROPERTY(EditAnywhere)
-	FDBAttackWindow ParryWindow = {0.0f, 0.0f};
-
-	/** Damage still applies; this interval resists flinch and forced launch. Empty disables it. */
-	UPROPERTY(EditAnywhere)
-	FDBAttackWindow StaggerResistanceWindow = {0.0f, 0.0f};
-
-	/** Earliest next attack; always after this motion's last hit window. */
-	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"))
-	float ComboStart = 0.65f;
-
-	/** Dodge may interrupt startup; jump/movement wait until the final hit ends. */
-	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"))
-	float EvadeCancelStart = 0.10f;
-
-	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"))
-	float JumpCancelStart = 0.55f;
-
-	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"))
-	float MoveCancelStart = 0.60f;
-
-	UPROPERTY(EditAnywhere, meta = (ClampMin = "0.01"))
-	float Damage = 25.0f;
-
-	bool IsValid() const;
-};
-
 DECLARE_MULTICAST_DELEGATE_TwoParams(FDBAttackWindowTraversed, float, float);
 DECLARE_MULTICAST_DELEGATE(FDBAttackStarted);
 DECLARE_MULTICAST_DELEGATE_OneParam(FDBParried, AActor*);
@@ -163,9 +73,10 @@ public:
 	void RequestJump();
 	void ReactToHit(UAnimMontage* Montage);
 	bool CanJumpFromAction() const;
-	void SetWeaponMesh(UStaticMeshComponent* InWeapon)
+	void InitializeWeapon(UStaticMeshComponent* InWeapon);
+	const UDBWeaponData* GetWeaponData() const
 	{
-		WeaponMesh = InWeapon;
+		return WeaponData;
 	}
 	void SetEvadeHeld(bool bHeld, float SprintSpeed)
 	{
@@ -224,8 +135,8 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0.01"))
 	double InputBufferLifetime = 0.18;
 
-	UPROPERTY(EditDefaultsOnly, Category = "Combat|Attack")
-	TArray<FDBAttackDefinition> Attacks;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Weapon")
+	TObjectPtr<UDBWeaponData> WeaponData;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Parry")
 	TObjectPtr<UParticleSystem> ParryEffect;
@@ -247,9 +158,6 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0"))
 	double EvadeJumpCancelStart = 0.10;
-
-	UPROPERTY(EditDefaultsOnly, Category = "Combat|Trace", meta = (ClampMin = "0.5"))
-	float BladeTraceRadius = 3.0f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0.01"))
 	double EvadeDuration = 0.80;

@@ -50,45 +50,33 @@ namespace
 	}
 }
 
-bool FDBAttackDefinition::IsValid() const
-{
-	if (Id == EDBAttackId::None || !Montage || !FMath::IsFinite(PlayRate) || PlayRate <= 0.0f
-	    || !FMath::IsFinite(Montage->RateScale) || Montage->RateScale <= 0.0f || !FMath::IsFinite(Damage)
-	    || Damage <= 0.0f || HitWindows.IsEmpty() || !FMath::IsFinite(ComboStart)
-	    || ComboStart >= Montage->GetPlayLength() || !FMath::IsFinite(EvadeCancelStart) || EvadeCancelStart < 0.0f
-	    || EvadeCancelStart >= Montage->GetPlayLength() || !FMath::IsFinite(JumpCancelStart)
-	    || JumpCancelStart >= Montage->GetPlayLength() || !FMath::IsFinite(MoveCancelStart)
-	    || MoveCancelStart >= Montage->GetPlayLength())
-	{
-		return false;
-	}
-	for (const FDBAttackWindow& Window : {ParryWindow, StaggerResistanceWindow})
-	{
-		if (!FMath::IsFinite(Window.Start) || !FMath::IsFinite(Window.End) || Window.Start < 0.0f
-		    || Window.End < Window.Start || Window.End > ComboStart)
-		{
-			return false;
-		}
-	}
-	float PreviousEnd = 0.0f;
-	for (const FDBAttackWindow& Window : HitWindows)
-	{
-		if (!FMath::IsFinite(Window.Start) || !FMath::IsFinite(Window.End) || Window.Start < PreviousEnd
-		    || Window.End <= Window.Start || Window.End > ComboStart || Window.End > JumpCancelStart
-		    || Window.End > MoveCancelStart)
-		{
-			return false;
-		}
-		PreviousEnd = Window.End;
-	}
-	return true;
-}
-
 UDBCombatComponent::UDBCombatComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bTickEvenWhenPaused = true;
 	PrimaryComponentTick.TickGroup = TG_PrePhysics;
+}
+
+void UDBCombatComponent::InitializeWeapon(UStaticMeshComponent* InWeapon)
+{
+	WeaponMesh = InWeapon;
+	if (!WeaponMesh)
+	{
+		return;
+	}
+	WeaponMesh->SetStaticMesh(WeaponData ? WeaponData->Mesh : nullptr);
+	if (!WeaponData)
+	{
+		return;
+	}
+	USkeletalMeshComponent* Mesh = CastChecked<ACharacter>(GetOwner())->GetMesh();
+	WeaponMesh->AttachToComponent(
+	    Mesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, WeaponData->AttachSocket);
+	WeaponMesh->SetRelativeTransform(WeaponData->RelativeTransform);
+	if (WeaponData->AnimationClass && Mesh->GetAnimClass() != WeaponData->AnimationClass)
+	{
+		Mesh->SetAnimInstanceClass(WeaponData->AnimationClass);
+	}
 }
 
 void UDBCombatComponent::BeginPlay()
@@ -242,8 +230,12 @@ bool UDBCombatComponent::IsAttackMovementValid(EDBAttackId Id) const
 
 const FDBAttackDefinition* UDBCombatComponent::FindAttack(EDBAttackId Id) const
 {
+	if (!WeaponData)
+	{
+		return nullptr;
+	}
 	const FDBAttackDefinition* Found = nullptr;
-	for (const FDBAttackDefinition& Definition : Attacks)
+	for (const FDBAttackDefinition& Definition : WeaponData->Attacks)
 	{
 		if (Definition.Id != Id)
 		{
@@ -962,7 +954,8 @@ bool UDBCombatComponent::ConfigureBlade()
 	const UStaticMesh* Mesh = WeaponMesh ? WeaponMesh->GetStaticMesh() : nullptr;
 	const UStaticMeshSocket* Base = Mesh ? Mesh->FindSocket(TEXT("BladeBase")) : nullptr;
 	const UStaticMeshSocket* Tip = Mesh ? Mesh->FindSocket(TEXT("BladeTip")) : nullptr;
-	if (!Base || !Tip || !FMath::IsFinite(BladeTraceRadius) || BladeTraceRadius < 0.5f)
+	if (!WeaponData || !Base || !Tip || !FMath::IsFinite(WeaponData->BladeTraceRadius)
+	    || WeaponData->BladeTraceRadius < 0.5f)
 	{
 		UE_LOG(LogDBCombat, Warning,
 		    TEXT("Assign a weapon with BladeBase/BladeTip sockets and a valid trace radius on %s."),
@@ -1206,8 +1199,8 @@ bool UDBCombatComponent::SweepParry(
 bool UDBCombatComponent::TryParry(
     UDBCombatComponent& Attacker, double ContactTime, const FVector& BladeBase, const FVector& BladeTip)
 {
-	if (!IsAttacking() || bParryUsed || !CanProcessInput() || !GetOwner()->CanBeDamaged()
-	    || !IsAttackMovementValid(ActiveAttack.Id))
+	if (!WeaponData || !Attacker.WeaponData || !IsAttacking() || bParryUsed || !CanProcessInput()
+	    || !GetOwner()->CanBeDamaged() || !IsAttackMovementValid(ActiveAttack.Id))
 	{
 		return false;
 	}
@@ -1231,7 +1224,7 @@ bool UDBCombatComponent::TryParry(
 	FVector IncomingPoint, DefenderPoint;
 	FMath::SegmentDistToSegmentSafe(BladeBase, BladeTip, Weapon.TransformPosition(BladeBaseLocal),
 	    Weapon.TransformPosition(BladeTipLocal), IncomingPoint, DefenderPoint);
-	const float Separation = ParryBladeTolerance + BladeTraceRadius + Attacker.BladeTraceRadius;
+	const float Separation = ParryBladeTolerance + WeaponData->BladeTraceRadius + Attacker.WeaponData->BladeTraceRadius;
 	if (FVector::DistSquared(IncomingPoint, DefenderPoint) > FMath::Square(Separation))
 	{
 		return false;
@@ -1288,7 +1281,7 @@ void UDBCombatComponent::SweepBlade(const FTransform& From, const FTransform& To
 {
 	const double Length = FMath::Max(From.TransformVector(BladeTipLocal - BladeBaseLocal).Size(),
 	    To.TransformVector(BladeTipLocal - BladeBaseLocal).Size());
-	const int32 Samples = FMath::Clamp(FMath::CeilToInt(Length / (BladeTraceRadius * 2.0f)), 1, 64);
+	const int32 Samples = FMath::Clamp(FMath::CeilToInt(Length / (WeaponData->BladeTraceRadius * 2.0f)), 1, 64);
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(DBBlade), false, GetOwner());
 	TArray<FHitResult> Hits;
 	for (int32 Sample = 0; Sample <= Samples && ActiveActionId == ActionId; ++Sample)
@@ -1296,7 +1289,7 @@ void UDBCombatComponent::SweepBlade(const FTransform& From, const FTransform& To
 		const FVector Local = FMath::Lerp(BladeBaseLocal, BladeTipLocal, static_cast<float>(Sample) / Samples);
 		Hits.Reset();
 		GetWorld()->SweepMultiByChannel(Hits, From.TransformPosition(Local), To.TransformPosition(Local),
-		    FQuat::Identity, DBCollision::Melee, FCollisionShape::MakeSphere(BladeTraceRadius), Params);
+		    FQuat::Identity, DBCollision::Melee, FCollisionShape::MakeSphere(WeaponData->BladeTraceRadius), Params);
 		for (const FHitResult& Hit : Hits)
 		{
 			AActor* Target = Hit.GetActor();
