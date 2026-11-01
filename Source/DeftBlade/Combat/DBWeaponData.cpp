@@ -14,13 +14,11 @@ bool FDBAttackDefinition::IsValid() const
 	{
 		return false;
 	}
-	for (const FDBAttackWindow& Window : {ParryWindow, StaggerResistanceWindow})
+	if (!FMath::IsFinite(StaggerResistanceWindow.Start) || !FMath::IsFinite(StaggerResistanceWindow.End)
+	    || StaggerResistanceWindow.Start < 0.0f || StaggerResistanceWindow.End < StaggerResistanceWindow.Start
+	    || StaggerResistanceWindow.End > ComboStart)
 	{
-		if (!FMath::IsFinite(Window.Start) || !FMath::IsFinite(Window.End) || Window.Start < 0.0f
-		    || Window.End < Window.Start || Window.End > ComboStart)
-		{
-			return false;
-		}
+		return false;
 	}
 	float PreviousEnd = 0.0f;
 	for (const FDBAttackWindow& Window : HitWindows)

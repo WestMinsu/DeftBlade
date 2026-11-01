@@ -82,6 +82,11 @@ void ADBPlayerCharacter::BeginPlay()
 
 void ADBPlayerCharacter::AssistAttackFacing()
 {
+	TargetingComponent->AssistAttackFacing(GetAttackInputDirection());
+}
+
+FVector ADBPlayerCharacter::GetAttackInputDirection() const
+{
 	const APlayerController* PC = Cast<APlayerController>(Controller);
 	const UEnhancedPlayerInput* Input = PC ? Cast<UEnhancedPlayerInput>(PC->PlayerInput) : nullptr;
 	FVector Direction = GetActorForwardVector();
@@ -98,8 +103,8 @@ void ADBPlayerCharacter::AssistAttackFacing()
 			Direction = Yaw.GetUnitAxis(EAxis::X) * Axes.Y + Yaw.GetUnitAxis(EAxis::Y) * Axes.X;
 		}
 	}
-	// Read the current action values: combat may already have consumed CMC's pending movement this frame.
-	TargetingComponent->AssistAttackFacing(Direction);
+	// Combat may already have consumed CMC's pending movement this frame.
+	return Direction;
 }
 
 float ADBPlayerCharacter::TakeDamage(
@@ -195,9 +200,10 @@ void ADBPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 		return;
 	}
 	if (!MoveAction || !GamepadMoveAction || !MouseLookAction || !GamepadLookAction || !JumpAction || !WalkAction
-	    || !EvadeAction || !LightAttackAction || !HeavyAttackAction || !LockOnAction || !SwitchTargetAction)
+	    || !EvadeAction || !LightAttackAction || !HeavyAttackAction || !LockOnAction || !SwitchTargetAction
+	    || !SwitchWeaponAction)
 	{
-		UE_LOG(LogDBPlayer, Error, TEXT("Assign all eleven input actions on %s's Blueprint defaults."), *GetName());
+		UE_LOG(LogDBPlayer, Error, TEXT("Assign all twelve input actions on %s's Blueprint defaults."), *GetName());
 		return;
 	}
 
@@ -212,6 +218,7 @@ void ADBPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	Input->BindAction(GamepadLookAction, ETriggerEvent::Completed, this, &ThisClass::StopLookGamepad);
 	Input->BindAction(GamepadLookAction, ETriggerEvent::Canceled, this, &ThisClass::StopLookGamepad);
 	Input->BindAction(LockOnAction, ETriggerEvent::Started, this, &ThisClass::ToggleLockOn);
+	Input->BindAction(SwitchWeaponAction, ETriggerEvent::Started, this, &ThisClass::SwitchWeapon);
 	Input->BindAction(SwitchTargetAction, ETriggerEvent::Triggered, this, &ThisClass::SwitchTarget);
 	Input->BindAction(SwitchTargetAction, ETriggerEvent::Completed, this, &ThisClass::StopSwitchTarget);
 	Input->BindAction(SwitchTargetAction, ETriggerEvent::Canceled, this, &ThisClass::StopSwitchTarget);
@@ -231,13 +238,27 @@ void ADBPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 void ADBPlayerCharacter::LightAttack()
 {
 	StopSprinting();
-	CombatComponent->RequestAttack(false);
+	CombatComponent->RequestAttack(false, GetAttackInputDirection());
 }
 
 void ADBPlayerCharacter::HeavyAttack()
 {
 	StopSprinting();
 	CombatComponent->RequestAttack(true);
+}
+
+void ADBPlayerCharacter::SwitchWeapon()
+{
+	const UDBWeaponData* Current = CombatComponent->GetWeaponData();
+	const int32 Index = WeaponLoadout.IndexOfByPredicate(
+	    [Current](const auto& Weapon)
+	    {
+		    return Weapon == Current;
+	    });
+	if (Index != INDEX_NONE && WeaponLoadout.Num() > 1)
+	{
+		CombatComponent->TryEquipWeapon(WeaponLoadout[(Index + 1) % WeaponLoadout.Num()]);
+	}
 }
 
 void ADBPlayerCharacter::Move(const FInputActionValue& Value)

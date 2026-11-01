@@ -15,6 +15,15 @@ void UDBAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	double DesiredLookYaw = 0;
 	const double CurrentLookYaw = LockNeckRotation.Yaw + LockHeadRotation.Yaw;
 	const UDBCombatComponent* Combat = Pawn ? Pawn->FindComponentByClass<UDBCombatComponent>() : nullptr;
+	if (const UDBWeaponData* Weapon = Combat ? Combat->GetWeaponData() : nullptr)
+	{
+		LocomotionIdle = Weapon->IdleAnimation;
+		LocomotionBlendSpace = Weapon->LocomotionBlendSpace;
+		WeaponCarryPose = Weapon->UpperBodyCarryPose ? Weapon->UpperBodyCarryPose : LocomotionIdle;
+		const float TargetWeight = Weapon->UpperBodyCarryPose && !Combat->IsAttacking() ? 1.0f : 0.0f;
+		WeaponCarryWeight = FMath::FInterpConstantTo(
+		    WeaponCarryWeight, TargetWeight, DeltaSeconds, TargetWeight > WeaponCarryWeight ? 8.0f : 20.0f);
+	}
 	if (Targeting && Targeting->IsLockedOn() && Character && Character->GetCharacterMovement()->IsMovingOnGround()
 	    && (!Combat || Combat->GetActionState() == EDBActionState::None))
 	{

@@ -12,6 +12,7 @@ class DEFTBLADE_API UDBTargetingComponent : public UActorComponent
 public:
 	UDBTargetingComponent();
 	AActor* SelectSoftTarget(const FVector& Direction);
+	FVector GetAttackDirection(const FVector& Direction);
 	void AssistAttackFacing(const FVector& Direction);
 	void ToggleLockOn();
 	void ClearLockOn();

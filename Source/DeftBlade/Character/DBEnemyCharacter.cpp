@@ -176,6 +176,8 @@ void ADBEnemyCharacter::HandleDeath()
 	{
 		AI->StopBehavior();
 	}
+	// Finish animation buffer swaps before enabling ragdoll physics on this mesh.
+	GetMesh()->HandleExistingParallelEvaluationTask(true, true);
 	CombatComponent->ResetCombat();
 	StopReaction();
 	GetCharacterMovement()->DisableMovement();

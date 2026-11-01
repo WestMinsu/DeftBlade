@@ -9,6 +9,7 @@ class UCameraComponent;
 class UDBCombatComponent;
 class UDBHealthComponent;
 class UDBTargetingComponent;
+class UDBWeaponData;
 class UInputAction;
 class UInputMappingContext;
 class USpringArmComponent;
@@ -55,6 +56,9 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
 	TObjectPtr<UStaticMeshComponent> WeaponMesh;
 
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Weapon")
+	TArray<TObjectPtr<UDBWeaponData>> WeaponLoadout;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Animation")
 	TObjectPtr<UAnimMontage> DoubleJumpMontage;
 
@@ -97,6 +101,8 @@ protected:
 	TObjectPtr<UInputAction> LockOnAction;
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> SwitchTargetAction;
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> SwitchWeaponAction;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Movement", meta = (ClampMin = "0"))
 	float RunSpeed = 600.0f;
@@ -124,10 +130,12 @@ protected:
 
 private:
 	void AssistAttackFacing();
+	FVector GetAttackInputDirection() const;
 	void HandleDeath();
 	void Move(const FInputActionValue& Value);
 	void LightAttack();
 	void HeavyAttack();
+	void SwitchWeapon();
 	void MoveGamepad(const FInputActionValue& Value);
 	void StopGamepadMovement();
 	void AddDirectionalMovement(const FVector2D& Axes);

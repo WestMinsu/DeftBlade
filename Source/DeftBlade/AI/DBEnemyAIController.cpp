@@ -6,7 +6,6 @@
 #include "Character/DBPlayerCharacter.h"
 #include "Combat/DBCombatComponent.h"
 #include "Combat/DBHealthComponent.h"
-#include "Components/SkeletalMeshComponent.h"
 #include "NavigationSystem.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
@@ -144,11 +143,6 @@ void ADBEnemyAIController::RefreshCombatState()
 	FVector MoveGoal = LastSeenLocation;
 	if (Enemy && TrackedTarget.IsValid())
 	{
-		if (const auto* Player = Cast<ADBPlayerCharacter>(TrackedTarget.Get()))
-		{
-			// Incoming blade traces need the player's current pose before resolving a weapon clash.
-			Enemy->GetMesh()->AddTickPrerequisiteComponent(Player->GetMesh());
-		}
 		if (auto* Navigation = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
 		{
 			FNavLocation GroundGoal;

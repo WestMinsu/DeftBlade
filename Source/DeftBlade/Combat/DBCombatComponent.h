@@ -69,11 +69,13 @@ public:
 	UDBCombatComponent();
 
 	void RequestEvade();
-	void RequestAttack(bool bHeavy);
+	void RequestAttack(bool bHeavy, const FVector& Direction = FVector::ZeroVector);
 	void RequestJump();
 	void ReactToHit(UAnimMontage* Montage);
 	bool CanJumpFromAction() const;
 	void InitializeWeapon(UStaticMeshComponent* InWeapon);
+	/** Grounded idle/movement only. A rejected press is not queued. */
+	bool TryEquipWeapon(UDBWeaponData* NewWeapon);
 	const UDBWeaponData* GetWeaponData() const
 	{
 		return WeaponData;
@@ -144,9 +146,13 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Parry")
 	TObjectPtr<USoundBase> ParrySound;
 
-	/** Extra separation allowed between the two blades, in centimeters. */
+	/** Game seconds after an eligible light press; consumed by the first parried contact. */
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Parry", meta = (ClampMin = "0"))
-	float ParryBladeTolerance = 30.0f;
+	float ParryDuration = 0.18f;
+
+	/** Every light press restarts this input-gap clock, including presses that cannot open a parry. */
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Parry", meta = (ClampMin = "0"))
+	float ParryInputInterval = 0.25f;
 
 	/** Real seconds; game time, movement and both animations slow together. */
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Parry", meta = (ClampMin = "0", ClampMax = "0.1"))
@@ -216,7 +222,7 @@ protected:
 
 private:
 	bool CanProcessInput() const;
-	void QueueInput(EDBActionInput Input);
+	void QueueInput(EDBActionInput Input, const FVector& Direction = FVector::ZeroVector);
 	EDBAttackId NextAttack(EDBActionInput Input) const;
 	bool IsAttackMovementValid(EDBAttackId Id) const;
 	void TryStartJump();
@@ -240,8 +246,9 @@ private:
 	    float Position, float CurrentPosition, const FTransform& CurrentMesh, const FTransform& CurrentWeapon) const;
 	void TraceAttack(float Previous, float Current, const FTransform& CurrentMesh, const FTransform& CurrentWeapon);
 	void SweepBlade(const FTransform& From, const FTransform& To, uint64 ActionId);
-	bool SweepParry(const FTransform& From, const FTransform& To, double FromTime, double ToTime, int32 HitWindow);
-	bool TryParry(UDBCombatComponent& Attacker, double ContactTime, const FVector& BladeBase, const FVector& BladeTip);
+	bool CanParry() const;
+	void OpenParryWindow(const FVector& Direction);
+	bool TryParry(UDBCombatComponent& Attacker, const FVector& ImpactPoint);
 	void StopParryHitStop();
 	void UpdateEvadeMovement(float DeltaTime);
 	bool IsEvadeMontageActive() const;
@@ -265,7 +272,6 @@ private:
 	bool bBackwardEvade = false;
 	bool bAirEvadeUsed = false;
 	bool bAirLightComboUsed = false;
-	bool bParryUsed = false;
 	UPROPERTY(Transient)
 	FDBAttackDefinition ActiveAttack;
 	int32 ActiveHitWindow = INDEX_NONE;
@@ -277,14 +283,14 @@ private:
 	FDelegateHandle PoseFinalizedHandle;
 	FTransform PreviousMeshTransform;
 	FTransform PreviousWeaponTransform;
-	FTransform EarlierWeaponTransform;
-	double WeaponPoseTime = 0.0;
-	double EarlierWeaponTime = 0.0;
 	FVector BladeBaseLocal = FVector::ZeroVector;
 	FVector BladeTipLocal = FVector::ZeroVector;
 	TSet<TWeakObjectPtr<AActor>> HitActors;
 	bool bAttackEndedPending = false;
 	double GroundJumpPressedAt = -1.0;
+	double LastLightInputAt = -1.0;
+	double ParryWindowEndsAt = 0.0;
+	FVector ParryDirection = FVector::ForwardVector;
 	double ParryHitStopEndsAt = 0.0;
 	float TimeDilationBeforeParry = 1.0f;
 	bool bAttackMovementStarted = false;

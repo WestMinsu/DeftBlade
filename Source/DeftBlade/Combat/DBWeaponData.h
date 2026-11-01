@@ -6,6 +6,8 @@
 
 class UAnimInstance;
 class UAnimMontage;
+class UAnimSequence;
+class UBlendSpace;
 class UStaticMesh;
 
 UENUM(BlueprintType)
@@ -71,9 +73,9 @@ struct FDBAttackDefinition
 	UPROPERTY(EditAnywhere)
 	TArray<FDBAttackWindow> HitWindows = {FDBAttackWindow()};
 
-	/** Empty [0, 0) disables parrying. One frontal weapon clash per attack. */
+	/** Light input can arm a parry during this move; Light1 also enables idle parries. */
 	UPROPERTY(EditAnywhere)
-	FDBAttackWindow ParryWindow = {0.0f, 0.0f};
+	bool bCanParry = false;
 
 	/** Damage still applies; this interval resists flinch and forced launch. Empty disables it. */
 	UPROPERTY(EditAnywhere)
@@ -118,6 +120,16 @@ public:
 	/** Existing locomotion/slot AnimBP preset; not changed during an action. */
 	UPROPERTY(EditAnywhere, Category = "Animation")
 	TSubclassOf<UAnimInstance> AnimationClass;
+
+	UPROPERTY(EditAnywhere, Category = "Animation")
+	TObjectPtr<UAnimSequence> IdleAnimation;
+
+	UPROPERTY(EditAnywhere, Category = "Animation")
+	TObjectPtr<UBlendSpace> LocomotionBlendSpace;
+
+	/** Optional arm pose for carrying a long weapon outside attacks. */
+	UPROPERTY(EditAnywhere, Category = "Animation")
+	TObjectPtr<UAnimSequence> UpperBodyCarryPose;
 
 	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ClampMin = "0.5"))
 	float BladeTraceRadius = 3.0f;

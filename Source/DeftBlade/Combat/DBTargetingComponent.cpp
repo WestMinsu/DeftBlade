@@ -118,20 +118,23 @@ AActor* UDBTargetingComponent::SelectSoftTarget(const FVector& Direction)
 
 void UDBTargetingComponent::AssistAttackFacing(const FVector& Direction)
 {
+	GetOwner()->SetActorRotation(GetAttackDirection(Direction).Rotation());
+}
+
+FVector UDBTargetingComponent::GetAttackDirection(const FVector& Direction)
+{
 	if (bLockOnActive)
 	{
 		if (IsEligible(LockedTarget.Get(), FMath::Max(LockOnRange, LockOnReleaseRange), LockOnMaxHeight))
 		{
-			GetOwner()->SetActorRotation(
-			    FRotator(0, (GetTargetPoint() - GetOwner()->GetActorLocation()).Rotation().Yaw, 0));
-			return;
+			return (GetTargetPoint() - GetOwner()->GetActorLocation()).GetSafeNormal2D();
 		}
 		ClearLockOn();
 	}
 	const FVector Forward = Direction.GetSafeNormal2D();
 	if (Forward.IsNearlyZero())
 	{
-		return;
+		return GetOwner()->GetActorForwardVector().GetSafeNormal2D();
 	}
 	const float IntentYaw = Forward.Rotation().Yaw;
 	float Yaw = IntentYaw;
@@ -141,7 +144,7 @@ void UDBTargetingComponent::AssistAttackFacing(const FVector& Direction)
 		const float Limit = FMath::Clamp(MaxAttackYawCorrection, 0.f, 90.f);
 		Yaw += FMath::Clamp(FMath::FindDeltaAngleDegrees(IntentYaw, TargetYaw), -Limit, Limit);
 	}
-	GetOwner()->SetActorRotation(FRotator(0, Yaw, 0));
+	return FRotator(0, Yaw, 0).Vector();
 }
 
 bool UDBTargetingComponent::CanUseLockOn() const
