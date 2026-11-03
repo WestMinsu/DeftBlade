@@ -31,7 +31,8 @@ enum class EDBActionInput : uint8
 	LightAttack,
 	HeavyAttack,
 	Jump,
-	Launcher
+	Launcher,
+	SwitchWeapon
 };
 
 /** One pending action request. Id == 0 means the slot is empty. */
@@ -48,6 +49,10 @@ struct FDBBufferedAction
 
 	UPROPERTY(VisibleAnywhere)
 	EDBActionInput Input = EDBActionInput::None;
+
+	/** Only set for a switch link; shares the same single pending-input slot. */
+	UPROPERTY()
+	TObjectPtr<UDBWeaponData> Weapon;
 
 	bool IsExpired(double Now, double Lifetime) const
 	{
@@ -74,7 +79,7 @@ public:
 	void ReactToHit(UAnimMontage* Montage);
 	bool CanJumpFromAction() const;
 	void InitializeWeapon(UStaticMeshComponent* InWeapon);
-	/** Grounded idle/movement only. A rejected press is not queued. */
+	/** Idle equips immediately; authored ground-attack links buffer one switch until ComboStart. */
 	bool TryEquipWeapon(UDBWeaponData* NewWeapon);
 	const UDBWeaponData* GetWeaponData() const
 	{
@@ -222,7 +227,9 @@ protected:
 
 private:
 	bool CanProcessInput() const;
-	void QueueInput(EDBActionInput Input, const FVector& Direction = FVector::ZeroVector);
+	void QueueInput(
+	    EDBActionInput Input, const FVector& Direction = FVector::ZeroVector, UDBWeaponData* NewWeapon = nullptr);
+	bool CanEquipWeapon(const UDBWeaponData* NewWeapon) const;
 	EDBAttackId NextAttack(EDBActionInput Input) const;
 	bool IsAttackMovementValid(EDBAttackId Id) const;
 	void TryStartJump();

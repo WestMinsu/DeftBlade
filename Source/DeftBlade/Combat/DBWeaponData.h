@@ -63,6 +63,10 @@ struct FDBAttackDefinition
 	UPROPERTY(EditAnywhere)
 	EDBAttackId NextHeavy = EDBAttackId::None;
 
+	/** Attack on the requested weapon after this move's ComboStart. None disables switching here. */
+	UPROPERTY(EditAnywhere)
+	EDBAttackId SwitchAttack = EDBAttackId::None;
+
 	UPROPERTY(EditAnywhere)
 	TObjectPtr<UAnimMontage> Montage;
 

@@ -36,7 +36,7 @@ namespace
 	bool IsAttackInput(EDBActionInput Input)
 	{
 		return Input == EDBActionInput::LightAttack || Input == EDBActionInput::HeavyAttack
-		       || Input == EDBActionInput::Launcher;
+		       || Input == EDBActionInput::Launcher || Input == EDBActionInput::SwitchWeapon;
 	}
 	bool IsAirLight(EDBAttackId Id)
 	{
@@ -47,6 +47,26 @@ namespace
 		return Input == EDBActionInput::Evade                                       ? 3
 		       : Input == EDBActionInput::Jump || Input == EDBActionInput::Launcher ? 2
 		                                                                            : 1;
+	}
+
+	const FDBAttackDefinition* FindWeaponAttack(const UDBWeaponData* Weapon, EDBAttackId Id)
+	{
+		const FDBAttackDefinition* Found = nullptr;
+		if (Weapon)
+		{
+			for (const FDBAttackDefinition& Definition : Weapon->Attacks)
+			{
+				if (Definition.Id == Id)
+				{
+					if (Found)
+					{
+						return nullptr;
+					}
+					Found = &Definition;
+				}
+			}
+		}
+		return Found;
 	}
 }
 
@@ -83,11 +103,38 @@ bool UDBCombatComponent::TryEquipWeapon(UDBWeaponData* NewWeapon)
 {
 	const ACharacter* Character = CastChecked<ACharacter>(GetOwner());
 	const UAnimInstance* Anim = Character->GetMesh()->GetAnimInstance();
-	if (!CanProcessInput() || ActionState != EDBActionState::None || BufferedAction.Id != 0
-	    || !Character->GetCharacterMovement()->IsMovingOnGround() || EvadeMotionId != 0 || !Anim
-	    || Anim->IsAnyMontagePlaying() || !WeaponMesh || !NewWeapon || NewWeapon == WeaponData || !NewWeapon->Mesh
-	    || !NewWeapon->IdleAnimation || !NewWeapon->LocomotionBlendSpace
-	    || NewWeapon->AnimationClass != Character->GetMesh()->GetAnimClass()
+	if (!CanProcessInput() || !Character->GetCharacterMovement()->IsMovingOnGround() || !CanEquipWeapon(NewWeapon))
+	{
+		return false;
+	}
+	if (IsAttacking())
+	{
+		const FDBAttackDefinition* Next = FindWeaponAttack(NewWeapon, ActiveAttack.SwitchAttack);
+		if (ActiveAttack.SwitchAttack == EDBAttackId::None || !Next || !Next->IsValid() || IsAirLight(Next->Id)
+		    || Next->Id == EDBAttackId::Launcher || Next->Id == EDBAttackId::AirHeavy)
+		{
+			return false;
+		}
+		const uint64 PreviousRequest = NextRequestId;
+		QueueInput(EDBActionInput::SwitchWeapon, FVector::ZeroVector, NewWeapon);
+		return NextRequestId != PreviousRequest;
+	}
+	if (ActionState != EDBActionState::None || BufferedAction.Id != 0 || EvadeMotionId != 0 || !Anim
+	    || Anim->IsAnyMontagePlaying())
+	{
+		return false;
+	}
+	WeaponData = NewWeapon;
+	ParryWindowEndsAt = 0.0;
+	InitializeWeapon(WeaponMesh);
+	return true;
+}
+
+bool UDBCombatComponent::CanEquipWeapon(const UDBWeaponData* NewWeapon) const
+{
+	const ACharacter* Character = CastChecked<ACharacter>(GetOwner());
+	if (!WeaponMesh || !NewWeapon || NewWeapon == WeaponData || !NewWeapon->Mesh || !NewWeapon->IdleAnimation
+	    || !NewWeapon->LocomotionBlendSpace || NewWeapon->AnimationClass != Character->GetMesh()->GetAnimClass()
 	    || !FMath::IsFinite(NewWeapon->BladeTraceRadius) || NewWeapon->BladeTraceRadius < 0.5f
 	    || !Character->GetMesh()->DoesSocketExist(NewWeapon->AttachSocket))
 	{
@@ -99,9 +146,6 @@ bool UDBCombatComponent::TryEquipWeapon(UDBWeaponData* NewWeapon)
 	{
 		return false;
 	}
-	WeaponData = NewWeapon;
-	ParryWindowEndsAt = 0.0;
-	InitializeWeapon(WeaponMesh);
 	return true;
 }
 
@@ -155,7 +199,7 @@ void UDBCombatComponent::RequestJump()
 	QueueInput(EDBActionInput::Jump);
 }
 
-void UDBCombatComponent::QueueInput(EDBActionInput Input, const FVector& Direction)
+void UDBCombatComponent::QueueInput(EDBActionInput Input, const FVector& Direction, UDBWeaponData* NewWeapon)
 {
 	if (!CanProcessInput())
 	{
@@ -225,7 +269,7 @@ void UDBCombatComponent::QueueInput(EDBActionInput Input, const FVector& Directi
 		bAirEvadeUsed = true;
 		return;
 	}
-	BufferedAction = {++NextRequestId, Now, Input};
+	BufferedAction = {++NextRequestId, Now, Input, NewWeapon};
 }
 
 EDBAttackId UDBCombatComponent::NextAttack(EDBActionInput Input) const
@@ -237,6 +281,10 @@ EDBAttackId UDBCombatComponent::NextAttack(EDBActionInput Input) const
 	if (Input == EDBActionInput::Launcher)
 	{
 		return EDBAttackId::Launcher;
+	}
+	if (Input == EDBActionInput::SwitchWeapon)
+	{
+		return IsAttacking() ? ActiveAttack.SwitchAttack : EDBAttackId::None;
 	}
 	EDBAttackId Next;
 	if (IsAttacking())
@@ -271,24 +319,7 @@ bool UDBCombatComponent::IsAttackMovementValid(EDBAttackId Id) const
 
 const FDBAttackDefinition* UDBCombatComponent::FindAttack(EDBAttackId Id) const
 {
-	if (!WeaponData)
-	{
-		return nullptr;
-	}
-	const FDBAttackDefinition* Found = nullptr;
-	for (const FDBAttackDefinition& Definition : WeaponData->Attacks)
-	{
-		if (Definition.Id != Id)
-		{
-			continue;
-		}
-		if (Found)
-		{
-			return nullptr;
-		} // Ambiguous authoring must not select an arbitrary move.
-		Found = &Definition;
-	}
-	return Found;
+	return FindWeaponAttack(WeaponData, Id);
 }
 
 bool UDBCombatComponent::CanJumpFromAction() const
@@ -786,10 +817,14 @@ void UDBCombatComponent::UpdateAttackMovement(float DeltaTime)
 void UDBCombatComponent::TryStartAttack()
 {
 	ACharacter* Character = CastChecked<ACharacter>(GetOwner());
-	const FDBAttackDefinition* Definition = FindAttack(NextAttack(BufferedAction.Input));
+	const bool bSwitching = BufferedAction.Input == EDBActionInput::SwitchWeapon;
+	UDBWeaponData* NextWeapon = bSwitching ? BufferedAction.Weapon.Get() : WeaponData.Get();
+	const FDBAttackDefinition* Definition = FindWeaponAttack(NextWeapon, NextAttack(BufferedAction.Input));
 	const bool bContinuing = ActionState != EDBActionState::None;
 	UAnimInstance* Anim = Character->GetMesh()->GetAnimInstance();
-	if (!Anim || !Definition || !Definition->IsValid() || !IsAttackMovementValid(Definition->Id) || !ConfigureBlade())
+	if (!Anim || !Definition || !Definition->IsValid() || !IsAttackMovementValid(Definition->Id)
+	    || (bSwitching ? !CanEquipWeapon(NextWeapon) || !Character->GetCharacterMovement()->IsMovingOnGround()
+	                   : !ConfigureBlade()))
 	{
 		BufferedAction = {};
 		return;
@@ -803,6 +838,13 @@ void UDBCombatComponent::TryStartAttack()
 	{
 		BufferedAction = {};
 		return;
+	}
+	if (bSwitching)
+	{
+		WeaponData = NextWeapon;
+		ParryWindowEndsAt = 0.0;
+		InitializeWeapon(WeaponMesh);
+		ConfigureBlade();
 	}
 	FAnimMontageInstance* Instance = Anim->GetActiveInstanceForMontage(Definition->Montage);
 	check(Instance);
@@ -820,8 +862,9 @@ void UDBCombatComponent::TryStartAttack()
 	bAttackLanded = false;
 	ActionStartedAt = GetWorld()->GetTimeSeconds();
 	ActiveActionId = BufferedAction.Id;
-	ActionState =
-	    BufferedAction.Input == EDBActionInput::LightAttack ? EDBActionState::LightAttack : EDBActionState::HeavyAttack;
+	const bool bLight = bSwitching ? ActiveAttack.Id >= EDBAttackId::Light1 && ActiveAttack.Id <= EDBAttackId::Light4
+	                               : BufferedAction.Input == EDBActionInput::LightAttack;
+	ActionState = bLight ? EDBActionState::LightAttack : EDBActionState::HeavyAttack;
 	BufferedAction = {};
 	Character->StopJumping();
 	if (!bContinuing && Character->GetCharacterMovement()->IsMovingOnGround())
