@@ -42,6 +42,10 @@ namespace
 	{
 		return Id == EDBAttackId::AirLight1 || Id == EDBAttackId::AirLight2 || Id == EDBAttackId::AirLight3;
 	}
+	FName HandBone(EDBHitTraceSource Source)
+	{
+		return Source == EDBHitTraceSource::LeftHand ? TEXT("hand_l") : TEXT("hand_r");
+	}
 	int32 InputPriority(EDBActionInput Input)
 	{
 		return Input == EDBActionInput::Evade                                       ? 3
@@ -823,8 +827,8 @@ void UDBCombatComponent::TryStartAttack()
 	const bool bContinuing = ActionState != EDBActionState::None;
 	UAnimInstance* Anim = Character->GetMesh()->GetAnimInstance();
 	if (!Anim || !Definition || !Definition->IsValid() || !IsAttackMovementValid(Definition->Id)
-	    || (bSwitching ? !CanEquipWeapon(NextWeapon) || !Character->GetCharacterMovement()->IsMovingOnGround()
-	                   : !ConfigureBlade()))
+	    || (bSwitching && (!CanEquipWeapon(NextWeapon) || !Character->GetCharacterMovement()->IsMovingOnGround()))
+	    || !ConfigureTrace(*Definition, *NextWeapon))
 	{
 		BufferedAction = {};
 		return;
@@ -844,7 +848,6 @@ void UDBCombatComponent::TryStartAttack()
 		WeaponData = NextWeapon;
 		ParryWindowEndsAt = 0.0;
 		InitializeWeapon(WeaponMesh);
-		ConfigureBlade();
 	}
 	FAnimMontageInstance* Instance = Anim->GetActiveInstanceForMontage(Definition->Montage);
 	check(Instance);
@@ -885,7 +888,9 @@ void UDBCombatComponent::TryStartAttack()
 		StartAirMovement(ActiveAttack.Montage->GetPlayLength() / ActiveAttack.PlayRate);
 	}
 	PreviousMeshTransform = Character->GetMesh()->GetComponentTransform();
-	PreviousWeaponTransform = GetWeaponTransform();
+	PreviousWeaponTransform = GetTraceTransform(EDBHitTraceSource::Weapon);
+	PreviousLeftHandTransform = GetTraceTransform(EDBHitTraceSource::LeftHand);
+	PreviousRightHandTransform = GetTraceTransform(EDBHitTraceSource::RightHand);
 }
 
 void UDBCombatComponent::SampleAttackWindow(float Position)
@@ -1031,54 +1036,87 @@ void UDBCombatComponent::StopHitReaction()
 	}
 }
 
-bool UDBCombatComponent::ConfigureBlade()
+bool UDBCombatComponent::ConfigureTrace(const FDBAttackDefinition& Definition, const UDBWeaponData& Data)
 {
-	const UStaticMesh* Mesh = WeaponMesh ? WeaponMesh->GetStaticMesh() : nullptr;
-	const UStaticMeshSocket* Base = Mesh ? Mesh->FindSocket(TEXT("BladeBase")) : nullptr;
-	const UStaticMeshSocket* Tip = Mesh ? Mesh->FindSocket(TEXT("BladeTip")) : nullptr;
-	if (!WeaponData || !Base || !Tip || !FMath::IsFinite(WeaponData->BladeTraceRadius)
-	    || WeaponData->BladeTraceRadius < 0.5f)
+	if (!FMath::IsFinite(Data.BladeTraceRadius) || Data.BladeTraceRadius < 0.5f)
 	{
-		UE_LOG(LogDBCombat, Warning,
-		    TEXT("Assign a weapon with BladeBase/BladeTip sockets and a valid trace radius on %s."),
-		    *GetOwner()->GetName());
 		return false;
 	}
-	BladeBaseLocal = Base->RelativeLocation;
-	BladeTipLocal = Tip->RelativeLocation;
-	return FVector::DistSquared(BladeBaseLocal, BladeTipLocal) > 1.0;
+	const USkeletalMeshComponent* Mesh = CastChecked<ACharacter>(GetOwner())->GetMesh();
+	const bool bWeapon = Definition.HitWindows.ContainsByPredicate(
+	    [](const FDBAttackWindow& Window)
+	    {
+		    return Window.TraceSource == EDBHitTraceSource::Weapon;
+	    });
+	for (const FDBAttackWindow& Window : Definition.HitWindows)
+	{
+		if (Window.TraceSource != EDBHitTraceSource::Weapon
+		    && (Window.TraceSource > EDBHitTraceSource::RightHand
+		        || Mesh->GetBoneIndex(HandBone(Window.TraceSource)) == INDEX_NONE))
+		{
+			return false;
+		}
+	}
+	if (bWeapon)
+	{
+		const UStaticMeshSocket* Base = Data.Mesh ? Data.Mesh->FindSocket(TEXT("BladeBase")) : nullptr;
+		const UStaticMeshSocket* Tip = Data.Mesh ? Data.Mesh->FindSocket(TEXT("BladeTip")) : nullptr;
+		if (!WeaponMesh || (&Data == WeaponData.Get() && WeaponMesh->GetStaticMesh() != Data.Mesh) || !Base || !Tip
+		    || FVector::DistSquared(Base->RelativeLocation, Tip->RelativeLocation) <= 1.0)
+		{
+			UE_LOG(LogDBCombat, Warning, TEXT("Assign BladeBase/BladeTip sockets on %s's weapon."),
+			    *GetOwner()->GetName());
+			return false;
+		}
+		BladeBaseLocal = Base->RelativeLocation;
+		BladeTipLocal = Tip->RelativeLocation;
+	}
+	return true;
 }
 
-FTransform UDBCombatComponent::GetWeaponTransform() const
+FTransform UDBCombatComponent::GetTraceTransform(EDBHitTraceSource Source) const
 {
 	const USkeletalMeshComponent* Mesh = CastChecked<ACharacter>(GetOwner())->GetMesh();
+	if (Source != EDBHitTraceSource::Weapon)
+	{
+		return Mesh->GetSocketTransform(HandBone(Source));
+	}
 	// Attached components may update later than the bone-finalization callback.
-	return WeaponMesh->GetRelativeTransform() * Mesh->GetSocketTransform(WeaponMesh->GetAttachSocketName());
+	return WeaponMesh ? WeaponMesh->GetRelativeTransform() * Mesh->GetSocketTransform(WeaponMesh->GetAttachSocketName())
+	                  : FTransform::Identity;
 }
 
-FTransform UDBCombatComponent::SampleWeaponTransform(
-    float Position, float CurrentPosition, const FTransform& CurrentMesh, const FTransform& CurrentWeapon) const
+const FTransform& UDBCombatComponent::GetPreviousTraceTransform(EDBHitTraceSource Source) const
+{
+	return Source == EDBHitTraceSource::Weapon     ? PreviousWeaponTransform
+	       : Source == EDBHitTraceSource::LeftHand ? PreviousLeftHandTransform
+	                                               : PreviousRightHandTransform;
+}
+
+FTransform UDBCombatComponent::SampleTraceTransform(float Position, float CurrentPosition,
+    const FTransform& CurrentMesh, const FTransform& CurrentTrace, EDBHitTraceSource Source) const
 {
 	if (FMath::IsNearlyEqual(Position, PreviousAttackPosition))
 	{
-		return PreviousWeaponTransform;
+		return GetPreviousTraceTransform(Source);
 	}
 	if (FMath::IsNearlyEqual(Position, CurrentPosition) && !bAttackEndedPending)
 	{
-		return CurrentWeapon;
+		return CurrentTrace;
 	}
 
 	// A hitch may cross the entire hit window. Recover the authored poses inside
 	// that interval instead of tracing the later recovery pose or a single chord.
 	USkeletalMeshComponent* Mesh = CastChecked<ACharacter>(GetOwner())->GetMesh();
 	const FBoneContainer& Bones = Mesh->GetAnimInstance()->GetRequiredBones();
-	const USkeletalMeshSocket* Socket = Mesh->GetSocketByName(WeaponMesh->GetAttachSocketName());
-	const FCompactPoseBoneIndex Bone = Bones.MakeCompactPoseIndex(
-	    FMeshPoseBoneIndex(Mesh->GetBoneIndex(Socket ? Socket->BoneName : WeaponMesh->GetAttachSocketName())));
+	const FName SocketName = Source == EDBHitTraceSource::Weapon ? WeaponMesh->GetAttachSocketName() : HandBone(Source);
+	const USkeletalMeshSocket* Socket = Mesh->GetSocketByName(SocketName);
+	const FCompactPoseBoneIndex Bone =
+	    Bones.MakeCompactPoseIndex(FMeshPoseBoneIndex(Mesh->GetBoneIndex(Socket ? Socket->BoneName : SocketName)));
 	const FAnimTrack* Track = ActiveAttack.Montage->GetAnimationData(TEXT("DefaultSlot"));
 	if (!Track || Bone == INDEX_NONE)
 	{
-		return CurrentWeapon;
+		return CurrentTrace;
 	}
 
 	FMemMark Mark(FMemStack::Get());
@@ -1097,8 +1135,9 @@ FTransform UDBCombatComponent::SampleWeaponTransform(
 	    FMath::Clamp((Position - PreviousAttackPosition) / (CurrentPosition - PreviousAttackPosition), 0.0f, 1.0f);
 	MeshAtTime.Blend(PreviousMeshTransform, CurrentMesh, Alpha);
 	const FTransform SocketLocal = Socket ? Socket->GetSocketLocalTransform() : FTransform::Identity;
-	return WeaponMesh->GetRelativeTransform() * SocketLocal * ComponentPose.GetComponentSpaceTransform(Bone)
-	       * MeshAtTime;
+	const FTransform Offset =
+	    Source == EDBHitTraceSource::Weapon ? WeaponMesh->GetRelativeTransform() : FTransform::Identity;
+	return Offset * SocketLocal * ComponentPose.GetComponentSpaceTransform(Bone) * MeshAtTime;
 }
 
 void UDBCombatComponent::BonesFinalized()
@@ -1130,7 +1169,7 @@ void UDBCombatComponent::BonesFinalized()
 		Anim->Montage_Pause(ActiveAttack.Montage);
 	}
 	const FTransform CurrentMesh = Character->GetMesh()->GetComponentTransform();
-	const FTransform CurrentWeapon = GetWeaponTransform();
+	const FTransform CurrentWeapon = GetTraceTransform(EDBHitTraceSource::Weapon);
 	TraceAttack(PreviousAttackPosition, Position, CurrentMesh, CurrentWeapon);
 	if (ActionId != ActiveActionId)
 	{
@@ -1143,6 +1182,8 @@ void UDBCombatComponent::BonesFinalized()
 	}
 	PreviousMeshTransform = CurrentMesh;
 	PreviousWeaponTransform = CurrentWeapon;
+	PreviousLeftHandTransform = GetTraceTransform(EDBHitTraceSource::LeftHand);
+	PreviousRightHandTransform = GetTraceTransform(EDBHitTraceSource::RightHand);
 	// Flush this frame's contacts before changing the montage or resetting its per-swing hit set.
 	if (BufferedAction.Id != 0 && IsAttackInput(BufferedAction.Input) && Position >= ActiveAttack.ComboStart)
 	{
@@ -1162,10 +1203,12 @@ void UDBCombatComponent::TraceAttack(
     float Previous, float Current, const FTransform& CurrentMesh, const FTransform& CurrentWeapon)
 {
 	const uint64 ActionId = ActiveActionId;
-	if (ActiveAttack.Id == EDBAttackId::AirHeavy && FMath::IsNearlyEqual(Previous, Current) && IsAttackWindowOpen())
+	if (ActiveAttack.Id == EDBAttackId::AirHeavy && FMath::IsNearlyEqual(Previous, Current) && IsAttackWindowOpen()
+	    && ActiveAttack.HitWindows.IsValidIndex(ActiveHitWindow))
 	{
 		// Montage time is held, but CMC is still moving the blade through the world.
-		SweepBlade(PreviousWeaponTransform, CurrentWeapon, ActionId);
+		const EDBHitTraceSource Source = ActiveAttack.HitWindows[ActiveHitWindow].TraceSource;
+		SweepAttack(GetPreviousTraceTransform(Source), GetTraceTransform(Source), ActionId, Source);
 		return;
 	}
 	for (int32 Index = 0; Index < ActiveAttack.HitWindows.Num() && ActiveActionId == ActionId; ++Index)
@@ -1183,12 +1226,14 @@ void UDBCombatComponent::TraceAttack(
 		const float From = FMath::Max(Previous, Window.Start);
 		const float To = FMath::Min(Current, Window.End);
 		const int32 Steps = FMath::Clamp(FMath::CeilToInt((To - From) * 120.0f), 1, 32);
-		FTransform Last = SampleWeaponTransform(From, Current, CurrentMesh, CurrentWeapon);
+		const FTransform CurrentTrace =
+		    Window.TraceSource == EDBHitTraceSource::Weapon ? CurrentWeapon : GetTraceTransform(Window.TraceSource);
+		FTransform Last = SampleTraceTransform(From, Current, CurrentMesh, CurrentTrace, Window.TraceSource);
 		for (int32 Step = 1; Step <= Steps && ActiveActionId == ActionId; ++Step)
 		{
 			const float Time = FMath::Lerp(From, To, static_cast<float>(Step) / Steps);
-			const FTransform Next = SampleWeaponTransform(Time, Current, CurrentMesh, CurrentWeapon);
-			SweepBlade(Last, Next, ActionId);
+			const FTransform Next = SampleTraceTransform(Time, Current, CurrentMesh, CurrentTrace, Window.TraceSource);
+			SweepAttack(Last, Next, ActionId, Window.TraceSource);
 			Last = Next;
 		}
 	}
@@ -1291,16 +1336,20 @@ void UDBCombatComponent::StopParryHitStop()
 	}
 }
 
-void UDBCombatComponent::SweepBlade(const FTransform& From, const FTransform& To, uint64 ActionId)
+void UDBCombatComponent::SweepAttack(
+    const FTransform& From, const FTransform& To, uint64 ActionId, EDBHitTraceSource Source)
 {
-	const double Length = FMath::Max(From.TransformVector(BladeTipLocal - BladeBaseLocal).Size(),
-	    To.TransformVector(BladeTipLocal - BladeBaseLocal).Size());
-	const int32 Samples = FMath::Clamp(FMath::CeilToInt(Length / (WeaponData->BladeTraceRadius * 2.0f)), 1, 64);
+	const FVector Base = Source == EDBHitTraceSource::Weapon ? BladeBaseLocal : FVector::ZeroVector;
+	const FVector Tip = Source == EDBHitTraceSource::Weapon ? BladeTipLocal : FVector::ZeroVector;
+	const double Length = FMath::Max(From.TransformVector(Tip - Base).Size(), To.TransformVector(Tip - Base).Size());
+	const int32 Samples = Source == EDBHitTraceSource::Weapon
+	                          ? FMath::Clamp(FMath::CeilToInt(Length / (WeaponData->BladeTraceRadius * 2.0f)), 1, 64)
+	                          : 0;
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(DBBlade), false, GetOwner());
 	TArray<FHitResult> Hits;
 	for (int32 Sample = 0; Sample <= Samples && ActiveActionId == ActionId; ++Sample)
 	{
-		const FVector Local = FMath::Lerp(BladeBaseLocal, BladeTipLocal, static_cast<float>(Sample) / Samples);
+		const FVector Local = Samples ? FMath::Lerp(Base, Tip, static_cast<float>(Sample) / Samples) : Base;
 		Hits.Reset();
 		GetWorld()->SweepMultiByChannel(Hits, From.TransformPosition(Local), To.TransformPosition(Local),
 		    FQuat::Identity, DBCollision::Melee, FCollisionShape::MakeSphere(WeaponData->BladeTraceRadius), Params);

@@ -247,12 +247,13 @@ private:
 	void HitReactionEnded(UAnimMontage* Montage, bool bInterrupted, uint64 ActionId);
 	void StopHitReaction();
 	void BonesFinalized();
-	bool ConfigureBlade();
-	FTransform GetWeaponTransform() const;
-	FTransform SampleWeaponTransform(
-	    float Position, float CurrentPosition, const FTransform& CurrentMesh, const FTransform& CurrentWeapon) const;
+	bool ConfigureTrace(const FDBAttackDefinition& Definition, const UDBWeaponData& Data);
+	FTransform GetTraceTransform(EDBHitTraceSource Source) const;
+	const FTransform& GetPreviousTraceTransform(EDBHitTraceSource Source) const;
+	FTransform SampleTraceTransform(float Position, float CurrentPosition, const FTransform& CurrentMesh,
+	    const FTransform& CurrentTrace, EDBHitTraceSource Source) const;
 	void TraceAttack(float Previous, float Current, const FTransform& CurrentMesh, const FTransform& CurrentWeapon);
-	void SweepBlade(const FTransform& From, const FTransform& To, uint64 ActionId);
+	void SweepAttack(const FTransform& From, const FTransform& To, uint64 ActionId, EDBHitTraceSource Source);
 	bool CanParry() const;
 	void OpenParryWindow(const FVector& Direction);
 	bool TryParry(UDBCombatComponent& Attacker, const FVector& ImpactPoint);
@@ -290,6 +291,8 @@ private:
 	FDelegateHandle PoseFinalizedHandle;
 	FTransform PreviousMeshTransform;
 	FTransform PreviousWeaponTransform;
+	FTransform PreviousLeftHandTransform;
+	FTransform PreviousRightHandTransform;
 	FVector BladeBaseLocal = FVector::ZeroVector;
 	FVector BladeTipLocal = FVector::ZeroVector;
 	TSet<TWeakObjectPtr<AActor>> HitActors;

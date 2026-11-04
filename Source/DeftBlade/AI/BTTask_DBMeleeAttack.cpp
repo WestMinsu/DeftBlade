@@ -10,7 +10,7 @@
 
 UBTTask_DBMeleeAttack::UBTTask_DBMeleeAttack()
 {
-	NodeName = TEXT("Aim and commit sword attack");
+	NodeName = TEXT("Aim and commit melee attack");
 	// Each agent owns its request ID. Asset template nodes must never hold mutable agent state.
 	bCreateNodeInstance = true;
 	bNotifyTick = true;

@@ -11,6 +11,14 @@ class UBlendSpace;
 class UStaticMesh;
 
 UENUM(BlueprintType)
+enum class EDBHitTraceSource : uint8
+{
+	Weapon,
+	LeftHand,
+	RightHand
+};
+
+UENUM(BlueprintType)
 enum class EDBAttackId : uint8
 {
 	None,
@@ -42,6 +50,10 @@ struct FDBAttackWindow
 
 	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"))
 	float End = 0.35f;
+
+	/** Each swing selects its own geometry; separate fists share the same damage/actor filter. */
+	UPROPERTY(EditAnywhere)
+	EDBHitTraceSource TraceSource = EDBHitTraceSource::Weapon;
 
 	bool Overlaps(float Previous, float Current) const
 	{
@@ -112,6 +124,7 @@ class DEFTBLADE_API UDBWeaponData : public UDataAsset
 	GENERATED_BODY()
 
 public:
+	/** Optional for movesets whose hit windows use only hands. */
 	UPROPERTY(EditAnywhere, Category = "Weapon")
 	TObjectPtr<UStaticMesh> Mesh;
 
@@ -135,6 +148,7 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Animation")
 	TObjectPtr<UAnimSequence> UpperBodyCarryPose;
 
+	/** Radius of weapon-segment or hand sphere sweeps, in cm. */
 	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ClampMin = "0.5"))
 	float BladeTraceRadius = 3.0f;
 
