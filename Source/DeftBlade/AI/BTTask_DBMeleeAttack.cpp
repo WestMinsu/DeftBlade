@@ -139,7 +139,8 @@ void UBTTask_DBMeleeAttack::OnTaskFinished(UBehaviorTreeComponent& OwnerComp, ui
 	CancelOwnedAttack();
 	RequestId = 0;
 	Combat.Reset();
-	if (auto* AI = Cast<ADBEnemyAIController>(OwnerComp.GetAIOwner()))
+	if (auto* AI = Cast<ADBEnemyAIController>(OwnerComp.GetAIOwner());
+	    AI && (bStarted || Result != EBTNodeResult::Aborted))
 	{
 		AI->AttackFinished();
 	}

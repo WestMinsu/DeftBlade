@@ -22,6 +22,7 @@ class DEFTBLADE_API ADBEnemyAIController : public AAIController
 	GENERATED_BODY()
 public:
 	ADBEnemyAIController();
+	virtual void Tick(float DeltaSeconds) override;
 	virtual ETeamAttitude::Type GetTeamAttitudeTowards(const AActor& Other) const override;
 	void RefreshCombatState();
 	bool CanStartAttack() const;
@@ -46,6 +47,7 @@ private:
 	UFUNCTION()
 	void PerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
 	void ForgetTarget();
+	bool HasCommittedAttack() const;
 	TWeakObjectPtr<AActor> TrackedTarget;
 	bool bHasSight = false;
 	double LastSeenAt = 0;

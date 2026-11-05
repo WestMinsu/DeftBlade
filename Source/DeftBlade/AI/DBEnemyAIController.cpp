@@ -10,6 +10,7 @@
 #include "Combat/DBHealthComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "EngineUtils.h"
+#include "Navigation/PathFollowingComponent.h"
 #include "NavigationSystem.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
@@ -65,8 +66,24 @@ void ADBEnemyAIController::ForgetTarget()
 		}
 	}
 	TrackedTarget.Reset();
+	ClearFocus(EAIFocusPriority::Gameplay);
 	bHasSight = false;
 	LastSeenAt = -SearchDuration;
+}
+
+void ADBEnemyAIController::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	auto* Enemy = Cast<ADBEnemyCharacter>(GetPawn());
+	const auto* Combat = Enemy ? Enemy->FindComponentByClass<UDBCombatComponent>() : nullptr;
+	// The attack task owns aiming once its Blackboard branch is eligible.
+	if (bHasSight && TrackedTarget.IsValid() && Blackboard && !Blackboard->GetValueAsBool(DBEnemyBB::CanAttack) && Enemy
+	    && Enemy->CanAct() && Combat && Combat->GetActionState() == EDBActionState::None
+	    && GetMoveStatus() == EPathFollowingStatus::Idle && Enemy->GetVelocity().SizeSquared2D() < 100.)
+	{
+		const FRotator Facing(0, (TrackedTarget->GetActorLocation() - Enemy->GetActorLocation()).Rotation().Yaw, 0);
+		Enemy->SetActorRotation(FMath::RInterpConstantTo(Enemy->GetActorRotation(), Facing, DeltaSeconds, 180.f));
+	}
 }
 
 void ADBEnemyAIController::PerceptionUpdated(AActor* Actor, FAIStimulus Stimulus)
@@ -137,6 +154,12 @@ void ADBEnemyAIController::RefreshCombatState()
 		LastSeenLocation = TrackedTarget->GetActorLocation();
 		LastSeenAt = Now;
 	}
+	if (TrackedTarget.IsValid())
+	{
+		// Keep perception toward the known position while the body follows its path around other enemies.
+		// A location focus cannot track an unseen player's later movement.
+		SetFocalPoint(LastSeenLocation);
+	}
 	const bool bCanAct = Enemy && Enemy->CanAct();
 	const auto* Combat = Enemy ? Enemy->FindComponentByClass<UDBCombatComponent>() : nullptr;
 	const bool bCommittedAttack = Combat && Combat->IsAttacking();
@@ -166,7 +189,7 @@ void ADBEnemyAIController::RefreshCombatState()
 	    DBEnemyBB::HasLastKnownLocation, TrackedTarget.IsValid() && Now - LastSeenAt < SearchDuration);
 	// Finish the chosen pattern when it misses or leaves sight. Death and interruption still abort it.
 	Blackboard->SetValueAsBool(DBEnemyBB::CanAttack,
-	    bCanAct && Target && Combat && (bCommittedAttack || (bHasSight && bInRange && Now >= NextAttackAt)));
+	    bCanAct && Target && Combat && (bCommittedAttack || (bHasSight && bInRange && CanStartAttack())));
 	if (TrackedTarget.IsValid() && !bHasSight && Now - LastSeenAt >= SearchDuration)
 	{
 		ForgetTarget();
@@ -175,7 +198,7 @@ void ADBEnemyAIController::RefreshCombatState()
 
 bool ADBEnemyAIController::CanStartAttack() const
 {
-	if (!TrackedTarget.IsValid() || GetWorld()->GetTimeSeconds() < NextAttackAt)
+	if (!TrackedTarget.IsValid() || !bHasSight || GetWorld()->GetTimeSeconds() < NextAttackAt)
 	{
 		return false;
 	}
@@ -185,33 +208,37 @@ bool ADBEnemyAIController::CanStartAttack() const
 		{
 			continue;
 		}
-		const auto* Enemy = Cast<ADBEnemyCharacter>(It->GetPawn());
-		const auto* Combat = Enemy ? Enemy->FindComponentByClass<UDBCombatComponent>() : nullptr;
-		if (!Combat)
-		{
-			continue;
-		}
-		// Include a request queued earlier in this frame, before Combat has started its montage.
-		const EDBActionInput Pending = Combat->GetBufferedAction().Input;
-		if (Pending == EDBActionInput::LightAttack || Pending == EDBActionInput::HeavyAttack)
+		if (It->HasCommittedAttack())
 		{
 			return false;
 		}
-		if (Combat->IsAttacking())
-		{
-			const FDBAttackDefinition* Attack = Combat->FindAttack(Combat->GetAttackId());
-			const UAnimInstance* Anim = Enemy->GetMesh()->GetAnimInstance();
-			const auto* Instance = Attack && Anim ? Anim->GetInstanceForMontage(Attack->Montage) : nullptr;
-			if (!Instance
-			    || Instance->GetPosition()
-			           < Attack->HitWindows.Last().End
-			                 + It->GroupAttackRecovery * Attack->PlayRate * Attack->Montage->RateScale)
-			{
-				return false;
-			}
-		}
 	}
 	return true;
+}
+
+bool ADBEnemyAIController::HasCommittedAttack() const
+{
+	const auto* Enemy = Cast<ADBEnemyCharacter>(GetPawn());
+	const auto* Combat = Enemy ? Enemy->FindComponentByClass<UDBCombatComponent>() : nullptr;
+	if (!Combat)
+	{
+		return false;
+	}
+	const auto Pending = Combat->GetBufferedAction().Input;
+	if (Pending == EDBActionInput::LightAttack || Pending == EDBActionInput::HeavyAttack)
+	{
+		return true;
+	}
+	if (!Combat->IsAttacking())
+	{
+		return false;
+	}
+	const auto* Attack = Combat->FindAttack(Combat->GetAttackId());
+	const auto* Anim = Enemy->GetMesh()->GetAnimInstance();
+	const auto* Instance = Attack && Anim ? Anim->GetInstanceForMontage(Attack->Montage) : nullptr;
+	return !Instance
+	       || Instance->GetPosition()
+	              < Attack->HitWindows.Last().End + GroupAttackRecovery * Attack->PlayRate * Attack->Montage->RateScale;
 }
 
 void ADBEnemyAIController::AttackFinished()
