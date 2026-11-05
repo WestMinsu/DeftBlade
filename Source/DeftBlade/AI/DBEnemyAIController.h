@@ -24,6 +24,7 @@ public:
 	ADBEnemyAIController();
 	virtual ETeamAttitude::Type GetTeamAttitudeTowards(const AActor& Other) const override;
 	void RefreshCombatState();
+	bool CanStartAttack() const;
 	void AttackFinished();
 	void RememberAttacker(AActor* Attacker);
 	void StopBehavior();
@@ -37,6 +38,9 @@ protected:
 	float SearchDuration = 5;
 	UPROPERTY(EditDefaultsOnly, Category = "AI", meta = (ClampMin = "0.1"))
 	float AttackCooldown = 0.85f;
+	/** Game seconds after this enemy's last hit window before an ally may start its preparation. */
+	UPROPERTY(EditDefaultsOnly, Category = "AI", meta = (ClampMin = "0"))
+	float GroupAttackRecovery = 0.20f;
 
 private:
 	UFUNCTION()

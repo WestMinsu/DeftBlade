@@ -26,6 +26,10 @@ ADBEnemyCharacter::ADBEnemyCharacter()
 	Movement->bOrientRotationToMovement = true;
 	Movement->RotationRate = FRotator(0, 540, 0);
 	Movement->MaxWalkSpeed = 340;
+	// The shared AnimBP enters locomotion from speed and acceleration, including AI path following.
+	Movement->GetNavMovementProperties()->bUseAccelerationForPaths = true;
+	Movement->bUseRVOAvoidance = true;
+	Movement->AvoidanceConsiderationRadius = 400;
 	Movement->GravityScale = 2.0f;
 	CombatComponent = CreateDefaultSubobject<UDBCombatComponent>(TEXT("Combat"));
 	HealthComponent = CreateDefaultSubobject<UDBHealthComponent>(TEXT("Health"));

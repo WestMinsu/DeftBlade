@@ -69,14 +69,24 @@ void UBTTask_DBMeleeAttack::TickTask(UBehaviorTreeComponent& OwnerComp, uint8*, 
 	};
 	if (RequestId == 0)
 	{
-		if (Enemy->GetWorld()->GetTimeSeconds() - AimStartedAt > 0.75
-		    || FVector::DistSquared2D(Enemy->GetActorLocation(), Target->GetActorLocation())
-		           > FMath::Square(Enemy->GetAttackRange()))
+		if (FVector::DistSquared2D(Enemy->GetActorLocation(), Target->GetActorLocation())
+		    > FMath::Square(Enemy->GetAttackRange()))
 		{
 			FinishLatentTask(OwnerComp, EBTNodeResult::Failed);
 			return;
 		}
 		TurnTowardsTarget();
+		if (!AI->CanStartAttack())
+		{
+			// Waiting for an ally is not a failed aim and must not restart this agent's cooldown.
+			AimStartedAt = Enemy->GetWorld()->GetTimeSeconds();
+			return;
+		}
+		if (Enemy->GetWorld()->GetTimeSeconds() - AimStartedAt > 0.75)
+		{
+			FinishLatentTask(OwnerComp, EBTNodeResult::Failed);
+			return;
+		}
 		if (FMath::Abs(FMath::FindDeltaAngleDegrees(Enemy->GetActorRotation().Yaw, DesiredRotation.Yaw)) <= 15.0)
 		{
 			Combat->RequestAttack(bComboAttack);

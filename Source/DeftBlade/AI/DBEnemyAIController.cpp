@@ -1,11 +1,15 @@
 #include "AI/DBEnemyAIController.h"
 
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "BrainComponent.h"
 #include "Character/DBEnemyCharacter.h"
 #include "Character/DBPlayerCharacter.h"
 #include "Combat/DBCombatComponent.h"
 #include "Combat/DBHealthComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "EngineUtils.h"
 #include "NavigationSystem.h"
 #include "Perception/AIPerceptionComponent.h"
 #include "Perception/AISenseConfig_Sight.h"
@@ -167,6 +171,47 @@ void ADBEnemyAIController::RefreshCombatState()
 	{
 		ForgetTarget();
 	}
+}
+
+bool ADBEnemyAIController::CanStartAttack() const
+{
+	if (!TrackedTarget.IsValid() || GetWorld()->GetTimeSeconds() < NextAttackAt)
+	{
+		return false;
+	}
+	for (TActorIterator<ADBEnemyAIController> It(GetWorld()); It; ++It)
+	{
+		if (*It == this || It->TrackedTarget != TrackedTarget)
+		{
+			continue;
+		}
+		const auto* Enemy = Cast<ADBEnemyCharacter>(It->GetPawn());
+		const auto* Combat = Enemy ? Enemy->FindComponentByClass<UDBCombatComponent>() : nullptr;
+		if (!Combat)
+		{
+			continue;
+		}
+		// Include a request queued earlier in this frame, before Combat has started its montage.
+		const EDBActionInput Pending = Combat->GetBufferedAction().Input;
+		if (Pending == EDBActionInput::LightAttack || Pending == EDBActionInput::HeavyAttack)
+		{
+			return false;
+		}
+		if (Combat->IsAttacking())
+		{
+			const FDBAttackDefinition* Attack = Combat->FindAttack(Combat->GetAttackId());
+			const UAnimInstance* Anim = Enemy->GetMesh()->GetAnimInstance();
+			const auto* Instance = Attack && Anim ? Anim->GetInstanceForMontage(Attack->Montage) : nullptr;
+			if (!Instance
+			    || Instance->GetPosition()
+			           < Attack->HitWindows.Last().End
+			                 + It->GroupAttackRecovery * Attack->PlayRate * Attack->Montage->RateScale)
+			{
+				return false;
+			}
+		}
+	}
+	return true;
 }
 
 void ADBEnemyAIController::AttackFinished()
