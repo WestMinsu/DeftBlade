@@ -5,6 +5,8 @@
 #include "DBCombatEncounter.generated.h"
 
 class ADBEnemyCharacter;
+class ADBPlayerCharacter;
+class ATargetPoint;
 class UBoxComponent;
 class UStaticMeshComponent;
 
@@ -13,7 +15,19 @@ enum class EDBEncounterState : uint8
 {
 	Ready,
 	Active,
-	Cleared
+	Cleared,
+	Reinforcements
+};
+
+USTRUCT(BlueprintType)
+struct FDBReinforcementSpawn
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, Category = "Encounter")
+	TSubclassOf<ADBEnemyCharacter> EnemyClass;
+	UPROPERTY(EditAnywhere, Category = "Encounter")
+	TObjectPtr<ATargetPoint> SpawnPoint;
 };
 
 UCLASS()
@@ -23,6 +37,7 @@ class DEFTBLADE_API ADBCombatEncounter : public AActor
 
 public:
 	ADBCombatEncounter();
+	virtual void Tick(float DeltaSeconds) override;
 
 	UFUNCTION(BlueprintPure, Category = "Encounter")
 	EDBEncounterState GetState() const
@@ -44,6 +59,15 @@ protected:
 	TObjectPtr<UStaticMeshComponent> ExitGate;
 	UPROPERTY(EditInstanceOnly, Category = "Encounter")
 	TArray<TObjectPtr<ADBEnemyCharacter>> Enemies;
+	/** One optional group, spawned behind the side entrance after the assigned enemies fall. */
+	UPROPERTY(EditInstanceOnly, Category = "Encounter|Reinforcements")
+	TArray<FDBReinforcementSpawn> Reinforcements;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Encounter|Reinforcements")
+	TObjectPtr<UStaticMeshComponent> ReinforcementGate;
+	UPROPERTY(EditAnywhere, Category = "Encounter|Reinforcements", meta = (ClampMin = "0.1", Units = "s"))
+	float GateOpenDuration = 0.8f;
+	UPROPERTY(EditAnywhere, Category = "Encounter|Reinforcements", meta = (ClampMin = "0", Units = "cm"))
+	float GateLiftHeight = 450.0f;
 
 private:
 	UFUNCTION()
@@ -53,8 +77,14 @@ private:
 	void EnemyDestroyed(AActor* Enemy);
 	void TryStart(AActor* Actor);
 	void CheckCleared();
+	void StartReinforcements();
+	void BindEnemy(ADBEnemyCharacter* Enemy);
+	void PlayerDied();
 	void SetState(EDBEncounterState NewState);
 	void UpdateGates();
+	TWeakObjectPtr<ADBPlayerCharacter> EncounterPlayer;
+	FVector GateClosedLocation = FVector::ZeroVector;
+	double GateOpenStartedAt = -1;
 
 	UPROPERTY(
 	    VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Encounter", meta = (AllowPrivateAccess = "true"))

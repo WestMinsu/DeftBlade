@@ -107,6 +107,10 @@ void UDBPlayerHUDWidget::EncounterChanged()
 		case EDBEncounterState::Active:
 			EncounterText->SetText(NSLOCTEXT("DeftBlade", "EncounterActive", "Defeat all enemies"));
 			break;
+		case EDBEncounterState::Reinforcements:
+			EncounterText->SetText(
+			    NSLOCTEXT("DeftBlade", "EncounterReinforcements", "REINFORCEMENTS - Defeat the incoming enemies"));
+			break;
 		case EDBEncounterState::Cleared:
 			EncounterText->SetText(NSLOCTEXT("DeftBlade", "EncounterCleared", "AREA CLEAR - Exit unlocked"));
 			break;
