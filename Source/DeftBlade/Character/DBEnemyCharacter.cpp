@@ -96,6 +96,11 @@ float ADBEnemyCharacter::TakeDamage(
 	{
 		return Applied;
 	}
+	if (auto* AI = Cast<ADBEnemyAIController>(GetController()))
+	{
+		// Every accepted hit reveals its source, even when flinch is resisted.
+		AI->RememberAttacker(EventInstigator ? EventInstigator->GetPawn() : Causer);
+	}
 	if (CombatComponent->HasAttackStaggerResistance())
 	{
 		return Applied;
@@ -108,22 +113,25 @@ float ADBEnemyCharacter::TakeDamage(
 	{
 		return Applied;
 	}
-	PlayHitReaction(EventInstigator ? EventInstigator->GetPawn() : Causer, HitReactionMontage);
+	PlayHitReaction(HitReactionMontage);
 	return Applied;
 }
 
 void ADBEnemyCharacter::ReactToParry(AActor* Defender)
 {
-	PlayHitReaction(Defender, ParryReactionMontage ? ParryReactionMontage : HitReactionMontage);
+	if (auto* AI = Cast<ADBEnemyAIController>(GetController()))
+	{
+		AI->RememberAttacker(Defender);
+	}
+	PlayHitReaction(ParryReactionMontage ? ParryReactionMontage : HitReactionMontage);
 }
 
-void ADBEnemyCharacter::PlayHitReaction(AActor* Attacker, UAnimMontage* Montage)
+void ADBEnemyCharacter::PlayHitReaction(UAnimMontage* Montage)
 {
 	CombatComponent->ResetCombat();
 	if (auto* AI = Cast<ADBEnemyAIController>(GetController()))
 	{
 		AI->StopMovement();
-		AI->RememberAttacker(Attacker);
 	}
 	const double FallingSpeed = GetCharacterMovement()->IsFalling() ? GetVelocity().Z : 0.0;
 	GetCharacterMovement()->StopMovementImmediately();

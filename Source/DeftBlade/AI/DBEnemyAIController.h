@@ -14,6 +14,7 @@ namespace DBEnemyBB
 	inline const FName HasLastKnownLocation = TEXT("HasLastKnownLocation");
 	inline const FName CanAct = TEXT("CanAct");
 	inline const FName CanAttack = TEXT("CanAttack");
+	inline const FName PatrolLocation = TEXT("PatrolLocation");
 }
 
 UCLASS()
@@ -35,6 +36,7 @@ protected:
 	virtual void OnUnPossess() override;
 	UPROPERTY(VisibleAnywhere, Category = "AI")
 	TObjectPtr<UAISenseConfig_Sight> SightConfig;
+	/** Time spent searching while stopped; travel and hit reactions do not consume it. */
 	UPROPERTY(EditDefaultsOnly, Category = "AI", meta = (ClampMin = "0"))
 	float SearchDuration = 5;
 	UPROPERTY(EditDefaultsOnly, Category = "AI", meta = (ClampMin = "0.1"))
@@ -50,7 +52,7 @@ private:
 	bool HasCommittedAttack() const;
 	TWeakObjectPtr<AActor> TrackedTarget;
 	bool bHasSight = false;
-	double LastSeenAt = 0;
+	double SearchStartedAt = -1;
 	double NextAttackAt = 0;
 	FVector LastSeenLocation = FVector::ZeroVector;
 };

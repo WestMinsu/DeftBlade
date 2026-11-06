@@ -68,7 +68,7 @@ void ADBEnemyAIController::ForgetTarget()
 	TrackedTarget.Reset();
 	ClearFocus(EAIFocusPriority::Gameplay);
 	bHasSight = false;
-	LastSeenAt = -SearchDuration;
+	SearchStartedAt = -1;
 }
 
 void ADBEnemyAIController::Tick(float DeltaSeconds)
@@ -77,11 +77,11 @@ void ADBEnemyAIController::Tick(float DeltaSeconds)
 	auto* Enemy = Cast<ADBEnemyCharacter>(GetPawn());
 	const auto* Combat = Enemy ? Enemy->FindComponentByClass<UDBCombatComponent>() : nullptr;
 	// The attack task owns aiming once its Blackboard branch is eligible.
-	if (bHasSight && TrackedTarget.IsValid() && Blackboard && !Blackboard->GetValueAsBool(DBEnemyBB::CanAttack) && Enemy
+	if (TrackedTarget.IsValid() && Blackboard && !Blackboard->GetValueAsBool(DBEnemyBB::CanAttack) && Enemy
 	    && Enemy->CanAct() && Combat && Combat->GetActionState() == EDBActionState::None
 	    && GetMoveStatus() == EPathFollowingStatus::Idle && Enemy->GetVelocity().SizeSquared2D() < 100.)
 	{
-		const FRotator Facing(0, (TrackedTarget->GetActorLocation() - Enemy->GetActorLocation()).Rotation().Yaw, 0);
+		const FRotator Facing(0, (LastSeenLocation - Enemy->GetActorLocation()).Rotation().Yaw, 0);
 		Enemy->SetActorRotation(FMath::RInterpConstantTo(Enemy->GetActorRotation(), Facing, DeltaSeconds, 180.f));
 	}
 }
@@ -110,6 +110,7 @@ void ADBEnemyAIController::PerceptionUpdated(AActor* Actor, FAIStimulus Stimulus
 	else if (TrackedTarget.Get() == Actor)
 	{
 		bHasSight = false;
+		SearchStartedAt = -1;
 	}
 	RefreshCombatState();
 }
@@ -120,21 +121,22 @@ void ADBEnemyAIController::RememberAttacker(AActor* Attacker)
 	{
 		return;
 	}
+	auto* Health = Attacker->FindComponentByClass<UDBHealthComponent>();
+	if (!Health || Health->IsDead())
+	{
+		return;
+	}
 	if (TrackedTarget.Get() != Attacker)
 	{
 		ForgetTarget();
 		TrackedTarget = Attacker;
-		Attacker->FindComponentByClass<UDBHealthComponent>()->OnDeath.AddUObject(this, &ThisClass::ForgetTarget);
+		Health->OnDeath.AddUObject(this, &ThisClass::ForgetTarget);
 	}
 	LastSeenLocation = Attacker->GetActorLocation();
-	LastSeenAt = GetWorld()->GetTimeSeconds();
+	SearchStartedAt = -1;
 	// Keep existing sight. A newly remembered attacker still needs the sight sense to acquire it.
-	if (GetPawn())
-	{
-		const FVector Direction = LastSeenLocation - GetPawn()->GetActorLocation();
-		GetPawn()->SetActorRotation(FRotator(0, Direction.Rotation().Yaw, 0));
-	}
 	GetPerceptionComponent()->RequestStimuliListenerUpdate();
+	RefreshCombatState();
 }
 
 void ADBEnemyAIController::RefreshCombatState()
@@ -152,7 +154,6 @@ void ADBEnemyAIController::RefreshCombatState()
 	if (bHasSight && TrackedTarget.IsValid())
 	{
 		LastSeenLocation = TrackedTarget->GetActorLocation();
-		LastSeenAt = Now;
 	}
 	if (TrackedTarget.IsValid())
 	{
@@ -163,6 +164,22 @@ void ADBEnemyAIController::RefreshCombatState()
 	const bool bCanAct = Enemy && Enemy->CanAct();
 	const auto* Combat = Enemy ? Enemy->FindComponentByClass<UDBCombatComponent>() : nullptr;
 	const bool bCommittedAttack = Combat && Combat->IsAttacking();
+	if (TrackedTarget.IsValid() && !bHasSight && bCanAct && !bCommittedAttack
+	    && GetMoveStatus() == EPathFollowingStatus::Idle)
+	{
+		if (SearchStartedAt < 0)
+		{
+			SearchStartedAt = Now;
+		}
+		if (Now - SearchStartedAt >= SearchDuration)
+		{
+			ForgetTarget();
+		}
+	}
+	else
+	{
+		SearchStartedAt = -1;
+	}
 	AActor* Target = bHasSight || bCommittedAttack ? TrackedTarget.Get() : nullptr;
 	const bool bInRange = Target && Enemy
 	                      && FVector::DistSquared2D(Enemy->GetActorLocation(), Target->GetActorLocation())
@@ -185,15 +202,10 @@ void ADBEnemyAIController::RefreshCombatState()
 	Blackboard->SetValueAsVector(DBEnemyBB::LastKnownLocation, MoveGoal);
 	Blackboard->SetValueAsBool(DBEnemyBB::CanAct, bCanAct);
 	Blackboard->SetValueAsObject(DBEnemyBB::Target, Target);
-	Blackboard->SetValueAsBool(
-	    DBEnemyBB::HasLastKnownLocation, TrackedTarget.IsValid() && Now - LastSeenAt < SearchDuration);
+	Blackboard->SetValueAsBool(DBEnemyBB::HasLastKnownLocation, TrackedTarget.IsValid());
 	// Finish the chosen pattern when it misses or leaves sight. Death and interruption still abort it.
 	Blackboard->SetValueAsBool(DBEnemyBB::CanAttack,
 	    bCanAct && Target && Combat && (bCommittedAttack || (bHasSight && bInRange && CanStartAttack())));
-	if (TrackedTarget.IsValid() && !bHasSight && Now - LastSeenAt >= SearchDuration)
-	{
-		ForgetTarget();
-	}
 }
 
 bool ADBEnemyAIController::CanStartAttack() const

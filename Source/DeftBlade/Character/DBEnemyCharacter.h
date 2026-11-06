@@ -10,6 +10,7 @@ class UDBHealthComponent;
 class UStaticMeshComponent;
 class UTextRenderComponent;
 class UAnimMontage;
+class ATargetPoint;
 
 UCLASS()
 class DEFTBLADE_API ADBEnemyCharacter : public ACharacter
@@ -27,6 +28,14 @@ public:
 	float GetAttackRange() const
 	{
 		return AttackRange;
+	}
+	const TArray<TObjectPtr<ATargetPoint>>& GetPatrolPoints() const
+	{
+		return PatrolPoints;
+	}
+	float GetPatrolSpeed() const
+	{
+		return PatrolSpeed;
 	}
 
 protected:
@@ -47,6 +56,11 @@ protected:
 	TObjectPtr<UBehaviorTree> BehaviorTree;
 	UPROPERTY(EditDefaultsOnly, Category = "AI", meta = (ClampMin = "50"))
 	float AttackRange = 170.0f;
+	/** Ordered level points. An empty route keeps this enemy stationary until alerted. */
+	UPROPERTY(EditInstanceOnly, Category = "AI|Patrol")
+	TArray<TObjectPtr<ATargetPoint>> PatrolPoints;
+	UPROPERTY(EditAnywhere, Category = "AI|Patrol", meta = (ClampMin = "1"))
+	float PatrolSpeed = 150.0f;
 	UPROPERTY(EditDefaultsOnly, Category = "Animation")
 	TObjectPtr<UAnimMontage> HitReactionMontage;
 	UPROPERTY(EditDefaultsOnly, Category = "Animation")
@@ -59,7 +73,7 @@ private:
 	void UpdateHealthText(float Current, float Maximum);
 	void HandleDeath();
 	void ReactToParry(AActor* Defender);
-	void PlayHitReaction(AActor* Attacker, UAnimMontage* Montage);
+	void PlayHitReaction(UAnimMontage* Montage);
 	void StopReaction();
 	void ReactionEnded(UAnimMontage* Montage, bool bInterrupted, int32 InstanceId);
 	int32 ReactionInstanceId = INDEX_NONE;
