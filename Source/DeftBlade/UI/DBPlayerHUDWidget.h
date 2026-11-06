@@ -34,7 +34,11 @@ protected:
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UBorder> DamageFlash;
 	UPROPERTY(meta = (BindWidget))
-	TObjectPtr<UWidget> DeathPanel;
+	TObjectPtr<UWidget> ResultPanel;
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UTextBlock> ResultTitle;
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UTextBlock> RetryLabel;
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UButton> RetryButton;
 	UPROPERTY(Transient, meta = (BindWidgetAnim))
@@ -48,7 +52,8 @@ private:
 	void HealthChanged(float Current, float Maximum);
 	void EncounterChanged();
 	void ShowDeath();
-	void ReleaseDeathInput();
+	void ShowResult(bool bCompleted);
+	void ReleaseResultInput();
 	UFUNCTION()
 	void Retry();
 
@@ -56,6 +61,6 @@ private:
 	TWeakObjectPtr<ADBCombatEncounter> EncounterSource;
 	TWeakObjectPtr<UDBTargetingComponent> TargetingSource;
 	float PreviousHealth = 0;
-	bool bShowingDeath = false;
+	bool bShowingResult = false;
 	bool bRetryRequested = false;
 };

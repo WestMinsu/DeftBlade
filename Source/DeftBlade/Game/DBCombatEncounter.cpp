@@ -4,10 +4,13 @@
 #include "Character/DBEnemyCharacter.h"
 #include "Character/DBPlayerCharacter.h"
 #include "Combat/DBHealthComponent.h"
+#include "Combat/DBCombatComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/TargetPoint.h"
+#include "Engine/TriggerBox.h"
 #include "Engine/World.h"
+#include "GameFramework/CharacterMovementComponent.h"
 
 ADBCombatEncounter::ADBCombatEncounter()
 {
@@ -36,6 +39,11 @@ void ADBCombatEncounter::BeginPlay()
 {
 	Super::BeginPlay();
 	GateClosedLocation = ReinforcementGate->GetRelativeLocation();
+	if (IsValid(FinishArea))
+	{
+		FinishArea->SetActorEnableCollision(false);
+		FinishArea->OnActorBeginOverlap.AddDynamic(this, &ThisClass::FinishEntered);
+	}
 	TSet<ADBEnemyCharacter*> BoundEnemies;
 	for (ADBEnemyCharacter* Enemy : Enemies)
 	{
@@ -86,6 +94,20 @@ void ADBCombatEncounter::TryStart(AActor* Actor)
 void ADBCombatEncounter::EnemyDestroyed(AActor*)
 {
 	CheckCleared();
+}
+
+void ADBCombatEncounter::FinishEntered(AActor*, AActor* OtherActor)
+{
+	auto* Player = Cast<ADBPlayerCharacter>(OtherActor);
+	if (State != EDBEncounterState::Cleared || !Player || !Player->IsPlayerControlled()
+	    || Player->FindComponentByClass<UDBHealthComponent>()->IsDead())
+	{
+		return;
+	}
+	Player->FindComponentByClass<UDBCombatComponent>()->ResetCombat();
+	Player->StopJumping();
+	Player->GetCharacterMovement()->StopMovementImmediately();
+	SetState(EDBEncounterState::Completed);
 }
 
 void ADBCombatEncounter::CheckCleared()
@@ -194,14 +216,22 @@ void ADBCombatEncounter::UpdateGates()
 		Gate->SetCollisionEnabled(bClosed ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
 	};
 	SetGate(EntranceGate, State == EDBEncounterState::Active || State == EDBEncounterState::Reinforcements);
-	SetGate(ExitGate, State != EDBEncounterState::Cleared);
-	SetGate(ReinforcementGate,
-	    State != EDBEncounterState::Cleared && (State != EDBEncounterState::Reinforcements || GateOpenStartedAt >= 0));
+	const bool bCleared = State == EDBEncounterState::Cleared || State == EDBEncounterState::Completed;
+	SetGate(ExitGate, !bCleared);
+	SetGate(ReinforcementGate, !bCleared && (State != EDBEncounterState::Reinforcements || GateOpenStartedAt >= 0));
+	if (IsValid(FinishArea))
+	{
+		FinishArea->SetActorEnableCollision(State == EDBEncounterState::Cleared);
+	}
 }
 
 void ADBCombatEncounter::EndPlay(const EEndPlayReason::Type Reason)
 {
 	EntryTrigger->OnComponentBeginOverlap.RemoveDynamic(this, &ThisClass::Entered);
+	if (IsValid(FinishArea))
+	{
+		FinishArea->OnActorBeginOverlap.RemoveDynamic(this, &ThisClass::FinishEntered);
+	}
 	if (EncounterPlayer.IsValid())
 	{
 		EncounterPlayer->FindComponentByClass<UDBHealthComponent>()->OnDeath.RemoveAll(this);

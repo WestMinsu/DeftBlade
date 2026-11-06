@@ -37,11 +37,11 @@ void UDBPlayerHUDWidget::BindHealth(UDBHealthComponent* Health)
 		HealthSource->OnHealthChanged.RemoveAll(this);
 		HealthSource->OnDeath.RemoveAll(this);
 	}
-	ReleaseDeathInput();
+	ReleaseResultInput();
 	bRetryRequested = false;
 	StopAnimation(DamageFlashAnimation);
 	DamageFlash->SetRenderOpacity(0);
-	DeathPanel->SetVisibility(ESlateVisibility::Collapsed);
+	ResultPanel->SetVisibility(ESlateVisibility::Collapsed);
 	RetryButton->SetIsEnabled(true);
 	HealthSource = Health;
 	TargetingSource = Health ? Health->GetOwner()->FindComponentByClass<UDBTargetingComponent>() : nullptr;
@@ -89,6 +89,10 @@ void UDBPlayerHUDWidget::BindEncounter(ADBCombatEncounter* Encounter)
 
 void UDBPlayerHUDWidget::EncounterChanged()
 {
+	if (EncounterSource.IsValid() && EncounterSource->GetState() == EDBEncounterState::Completed)
+	{
+		ShowResult(true);
+	}
 	if (!EncounterText)
 	{
 		return;
@@ -114,17 +118,29 @@ void UDBPlayerHUDWidget::EncounterChanged()
 		case EDBEncounterState::Cleared:
 			EncounterText->SetText(NSLOCTEXT("DeftBlade", "EncounterCleared", "AREA CLEAR - Exit unlocked"));
 			break;
+		case EDBEncounterState::Completed:
+			EncounterText->SetVisibility(ESlateVisibility::Collapsed);
+			break;
 	}
 }
 
 void UDBPlayerHUDWidget::ShowDeath()
 {
-	if (bShowingDeath)
+	ShowResult(false);
+}
+
+void UDBPlayerHUDWidget::ShowResult(bool bCompleted)
+{
+	if (bShowingResult)
 	{
 		return;
 	}
-	bShowingDeath = true;
-	DeathPanel->SetVisibility(ESlateVisibility::Visible);
+	bShowingResult = true;
+	ResultTitle->SetText(bCompleted ? NSLOCTEXT("DeftBlade", "RunComplete", "TRIAL COMPLETE")
+	                                : NSLOCTEXT("DeftBlade", "Defeated", "DEFEATED"));
+	RetryLabel->SetText(
+	    bCompleted ? NSLOCTEXT("DeftBlade", "PlayAgain", "PLAY AGAIN") : NSLOCTEXT("DeftBlade", "Retry", "RETRY"));
+	ResultPanel->SetVisibility(ESlateVisibility::Visible);
 	if (APlayerController* PC = GetOwningPlayer())
 	{
 		PC->FlushPressedKeys();
@@ -134,13 +150,13 @@ void UDBPlayerHUDWidget::ShowDeath()
 	}
 }
 
-void UDBPlayerHUDWidget::ReleaseDeathInput()
+void UDBPlayerHUDWidget::ReleaseResultInput()
 {
-	if (!bShowingDeath)
+	if (!bShowingResult)
 	{
 		return;
 	}
-	bShowingDeath = false;
+	bShowingResult = false;
 	if (APlayerController* PC = GetOwningPlayer())
 	{
 		PC->SetInputMode(FInputModeGameOnly());
@@ -151,13 +167,14 @@ void UDBPlayerHUDWidget::ReleaseDeathInput()
 
 void UDBPlayerHUDWidget::Retry()
 {
-	if (bRetryRequested || !HealthSource.IsValid() || !HealthSource->IsDead())
+	const bool bCompleted = EncounterSource.IsValid() && EncounterSource->GetState() == EDBEncounterState::Completed;
+	if (bRetryRequested || !HealthSource.IsValid() || (!HealthSource->IsDead() && !bCompleted))
 	{
 		return;
 	}
 	bRetryRequested = true;
 	RetryButton->SetIsEnabled(false);
-	ReleaseDeathInput();
+	ReleaseResultInput();
 	UGameplayStatics::OpenLevel(this, FName(*UGameplayStatics::GetCurrentLevelName(this, true)));
 }
 
@@ -172,7 +189,7 @@ void UDBPlayerHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTi
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
 	FVector2D Position;
-	if (!bShowingDeath && TargetingSource.IsValid() && TargetingSource->IsLockedOn()
+	if (!bShowingResult && TargetingSource.IsValid() && TargetingSource->IsLockedOn()
 	    && UWidgetLayoutLibrary::ProjectWorldLocationToWidgetPosition(
 	        GetOwningPlayer(), TargetingSource->GetTargetPoint(), Position, true))
 	{

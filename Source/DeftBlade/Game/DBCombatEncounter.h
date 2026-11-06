@@ -7,6 +7,7 @@
 class ADBEnemyCharacter;
 class ADBPlayerCharacter;
 class ATargetPoint;
+class ATriggerBox;
 class UBoxComponent;
 class UStaticMeshComponent;
 
@@ -16,7 +17,8 @@ enum class EDBEncounterState : uint8
 	Ready,
 	Active,
 	Cleared,
-	Reinforcements
+	Reinforcements,
+	Completed
 };
 
 USTRUCT(BlueprintType)
@@ -59,6 +61,9 @@ protected:
 	TObjectPtr<UStaticMeshComponent> ExitGate;
 	UPROPERTY(EditInstanceOnly, Category = "Encounter")
 	TArray<TObjectPtr<ADBEnemyCharacter>> Enemies;
+	/** Optional end area beyond the exit. Enabled only after combat is cleared. */
+	UPROPERTY(EditInstanceOnly, Category = "Encounter")
+	TObjectPtr<ATriggerBox> FinishArea;
 	/** One optional group, spawned behind the side entrance after the assigned enemies fall. */
 	UPROPERTY(EditInstanceOnly, Category = "Encounter|Reinforcements")
 	TArray<FDBReinforcementSpawn> Reinforcements;
@@ -75,6 +80,8 @@ private:
 	    int32 OtherBodyIndex, bool bFromSweep, const FHitResult& Sweep);
 	UFUNCTION()
 	void EnemyDestroyed(AActor* Enemy);
+	UFUNCTION()
+	void FinishEntered(AActor* Area, AActor* OtherActor);
 	void TryStart(AActor* Actor);
 	void CheckCleared();
 	void StartReinforcements();
