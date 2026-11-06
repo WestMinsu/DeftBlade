@@ -10,6 +10,7 @@
 #include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
 #include "GameFramework/PlayerController.h"
+#include "Game/DBCombatEncounter.h"
 #include "Kismet/GameplayStatics.h"
 
 void UDBPlayerHUDWidget::NativeOnInitialized()
@@ -72,6 +73,46 @@ void UDBPlayerHUDWidget::HealthChanged(float Current, float Maximum)
 	PreviousHealth = Current;
 }
 
+void UDBPlayerHUDWidget::BindEncounter(ADBCombatEncounter* Encounter)
+{
+	if (EncounterSource.IsValid())
+	{
+		EncounterSource->OnStateChanged.RemoveAll(this);
+	}
+	EncounterSource = Encounter;
+	if (Encounter)
+	{
+		Encounter->OnStateChanged.AddUObject(this, &ThisClass::EncounterChanged);
+	}
+	EncounterChanged();
+}
+
+void UDBPlayerHUDWidget::EncounterChanged()
+{
+	if (!EncounterText)
+	{
+		return;
+	}
+	EncounterText->SetVisibility(
+	    EncounterSource.IsValid() ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	if (!EncounterSource.IsValid())
+	{
+		return;
+	}
+	switch (EncounterSource->GetState())
+	{
+		case EDBEncounterState::Ready:
+			EncounterText->SetText(NSLOCTEXT("DeftBlade", "EncounterReady", "Enter the combat area"));
+			break;
+		case EDBEncounterState::Active:
+			EncounterText->SetText(NSLOCTEXT("DeftBlade", "EncounterActive", "Defeat all enemies"));
+			break;
+		case EDBEncounterState::Cleared:
+			EncounterText->SetText(NSLOCTEXT("DeftBlade", "EncounterCleared", "AREA CLEAR - Exit unlocked"));
+			break;
+	}
+}
+
 void UDBPlayerHUDWidget::ShowDeath()
 {
 	if (bShowingDeath)
@@ -118,6 +159,7 @@ void UDBPlayerHUDWidget::Retry()
 
 void UDBPlayerHUDWidget::NativeDestruct()
 {
+	BindEncounter(nullptr);
 	BindHealth(nullptr);
 	Super::NativeDestruct();
 }

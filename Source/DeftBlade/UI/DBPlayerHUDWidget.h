@@ -5,6 +5,7 @@
 #include "DBPlayerHUDWidget.generated.h"
 
 class UBorder;
+class ADBCombatEncounter;
 class UButton;
 class UDBHealthComponent;
 class UDBTargetingComponent;
@@ -18,6 +19,7 @@ class DEFTBLADE_API UDBPlayerHUDWidget : public UUserWidget
 	GENERATED_BODY()
 public:
 	void BindHealth(UDBHealthComponent* Health);
+	void BindEncounter(ADBCombatEncounter* Encounter);
 
 protected:
 	virtual void NativeOnInitialized() override;
@@ -39,15 +41,19 @@ protected:
 	TObjectPtr<UWidgetAnimation> DamageFlashAnimation;
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UWidget> LockOnMarker;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> EncounterText;
 
 private:
 	void HealthChanged(float Current, float Maximum);
+	void EncounterChanged();
 	void ShowDeath();
 	void ReleaseDeathInput();
 	UFUNCTION()
 	void Retry();
 
 	TWeakObjectPtr<UDBHealthComponent> HealthSource;
+	TWeakObjectPtr<ADBCombatEncounter> EncounterSource;
 	TWeakObjectPtr<UDBTargetingComponent> TargetingSource;
 	float PreviousHealth = 0;
 	bool bShowingDeath = false;

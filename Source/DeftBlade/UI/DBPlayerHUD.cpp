@@ -2,6 +2,8 @@
 
 #include "Combat/DBHealthComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "Game/DBCombatEncounter.h"
+#include "EngineUtils.h"
 #include "UI/DBPlayerHUDWidget.h"
 
 void ADBPlayerHUD::BeginPlay()
@@ -19,6 +21,11 @@ void ADBPlayerHUD::BeginPlay()
 		return;
 	}
 	PlayerWidget->AddToPlayerScreen();
+	for (TActorIterator<ADBCombatEncounter> It(GetWorld()); It; ++It)
+	{
+		PlayerWidget->BindEncounter(*It);
+		break;
+	}
 	PC->OnPossessedPawnChanged.AddDynamic(this, &ThisClass::PawnChanged);
 	PawnChanged(nullptr, PC->GetPawn());
 }
