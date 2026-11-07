@@ -725,7 +725,7 @@ void UDBCombatComponent::HandleLanding()
 	}
 }
 
-void UDBCombatComponent::StartAirMovement(float Duration)
+void UDBCombatComponent::StartAirMovement(float Duration, float UpwardSpeed)
 {
 	StopAirMovement();
 	TSharedPtr<FRootMotionSource_ConstantForce> Motion = MakeShared<FRootMotionSource_ConstantForce>();
@@ -733,17 +733,17 @@ void UDBCombatComponent::StartAirMovement(float Duration)
 	Motion->Priority = 90;
 	Motion->AccumulateMode = ERootMotionAccumulateMode::Override;
 	Motion->Duration = Duration;
-	Motion->Force = FVector::ZeroVector;
+	Motion->Force = FVector(0, 0, UpwardSpeed);
 	Motion->Settings.UnSetFlag(ERootMotionSourceSettingsFlags::DisablePartialEndTick);
 	UCharacterMovementComponent* Movement = CastChecked<ACharacter>(GetOwner())->GetCharacterMovement();
-	// PhysFalling integrates the old and new velocities; discard the entry lift as well.
-	Movement->Velocity.Z = 0.0;
+	// PhysFalling integrates the old and new velocities; both must start with the same ascent.
+	Movement->Velocity.Z = UpwardSpeed;
 	AirMotionId = Movement->ApplyRootMotionSource(Motion);
 }
 
 void UDBCombatComponent::HoldAirborne(ACharacter* Attacker)
 {
-	StartAirMovement(0.75f);
+	StartAirMovement(0.75f, FMath::Max(Attacker->GetVelocity().Z, 0.0));
 	JuggleAttacker = Attacker;
 	JuggleHeight = Attacker->GetActorLocation().Z;
 }
@@ -756,6 +756,21 @@ void UDBCombatComponent::StopAirMovement()
 		AirMotionId = 0;
 	}
 	JuggleAttacker.Reset();
+}
+
+void UDBCombatComponent::StartLauncherMovement()
+{
+	if (bAttackMovementStarted)
+	{
+		return;
+	}
+	bAttackMovementStarted = true;
+	ACharacter* Character = CastChecked<ACharacter>(GetOwner());
+	if (Character->JumpCurrentCount == 0)
+	{
+		Character->Jump();
+	}
+	Character->LaunchCharacter(FVector(0, 0, LauncherUpwardSpeed), false, true);
 }
 
 void UDBCombatComponent::UpdateAttackMovement(float DeltaTime)
@@ -776,18 +791,37 @@ void UDBCombatComponent::UpdateAttackMovement(float DeltaTime)
 			}
 			else if (DeltaTime > 0.0f)
 			{
+				const bool bFollowingRise =
+				    IsAirLight(AttackerCombat->GetAttackId()) || JuggleAttacker->GetVelocity().Z > 0.0;
+				if (bFollowingRise)
+				{
+					JuggleHeight = JuggleAttacker->GetActorLocation().Z;
+				}
 				const double Error = JuggleHeight - Character->GetActorLocation().Z;
 				const double Speed = Error * (1.0 - FMath::Exp(-8.0 * DeltaTime)) / DeltaTime;
-				AirMotion->Force = FVector(0, 0, FMath::Clamp(Speed, -160.0, 160.0));
+				// Predict the next ascent speed, avoiding a one-frame overshoot when the attacker reaches its apex.
+				const double RiseSpeed =
+				    bFollowingRise
+				        ? FMath::Max(0.0, JuggleAttacker->GetVelocity().Z
+				                              + JuggleAttacker->GetCharacterMovement()->GetGravityZ() * DeltaTime)
+				        : 0.0;
+				AirMotion->Force = FVector(0, 0, RiseSpeed + FMath::Clamp(Speed, -160.0, 160.0));
 			}
 		}
-		else if (IsAirLight(GetAttackId()))
+		else if (IsAirLight(GetAttackId()) || GetAttackId() == EDBAttackId::AirHeavy)
 		{
-			const float Push = FMath::SmoothStep(0.0f, 0.05f, PreviousAttackPosition)
-			                   * (1.0f - FMath::SmoothStep(0.13f, 0.24f, PreviousAttackPosition));
-			AirMotion->Force = Character->GetActorForwardVector() * (180.0f * Push);
+			const float Push = IsAirLight(GetAttackId())
+			                       ? FMath::SmoothStep(0.0f, 0.05f, PreviousAttackPosition)
+			                             * (1.0f - FMath::SmoothStep(0.13f, 0.24f, PreviousAttackPosition))
+			                       : 0.0f;
+			// Preserve the launch arc across links, then hold at its apex. A ceiling ends the rise.
+			const double RiseSpeed =
+			    Character->GetVelocity().Z > 0.0
+			        ? FMath::Max(0.0, AirMotion->Force.Z + Character->GetCharacterMovement()->GetGravityZ() * DeltaTime)
+			        : 0.0;
+			AirMotion->Force = Character->GetActorForwardVector() * (180.0f * Push) + FVector(0, 0, RiseSpeed);
 		}
-		else if (GetAttackId() != EDBAttackId::AirHeavy)
+		else
 		{
 			StopAirMovement();
 		}
@@ -799,14 +833,10 @@ void UDBCombatComponent::UpdateAttackMovement(float DeltaTime)
 	}
 	if (ActiveAttack.Id == EDBAttackId::Launcher)
 	{
-		if (!bAttackMovementStarted && PreviousAttackPosition >= 0.25f)
+		if (!bAttackMovementStarted && PreviousAttackPosition >= ActiveAttack.HitWindows.Last().End)
 		{
-			bAttackMovementStarted = true;
-			if (Character->JumpCurrentCount == 0)
-			{
-				Character->Jump();
-			}
-			Character->LaunchCharacter(FVector(0, 0, 850), false, true);
+			// Whiffs still rise, after the grounded swing has had its chance to connect.
+			StartLauncherMovement();
 		}
 		else if (bAttackMovementStarted && Character->JumpCurrentCount > 0)
 		{
@@ -836,6 +866,10 @@ void UDBCombatComponent::TryStartAttack()
 		BufferedAction = {};
 		return;
 	}
+	const float RiseSpeed = (IsAirLight(Definition->Id) || Definition->Id == EDBAttackId::AirHeavy)
+	                                && (GetAttackId() == EDBAttackId::Launcher || IsAirLight(GetAttackId()))
+	                            ? FMath::Max(Character->GetVelocity().Z, 0.0)
+	                            : 0.0;
 	if (bContinuing)
 	{
 		StopEvadeMovement(false);
@@ -888,7 +922,7 @@ void UDBCombatComponent::TryStartAttack()
 	OnAttackStarted.Broadcast();
 	if (IsAirLight(ActiveAttack.Id) || ActiveAttack.Id == EDBAttackId::AirHeavy)
 	{
-		StartAirMovement(ActiveAttack.Montage->GetPlayLength() / ActiveAttack.PlayRate);
+		StartAirMovement(ActiveAttack.Montage->GetPlayLength() / ActiveAttack.PlayRate, RiseSpeed);
 	}
 	PreviousMeshTransform = Character->GetMesh()->GetComponentTransform();
 	PreviousWeaponTransform = GetTraceTransform(EDBHitTraceSource::Weapon);
@@ -1402,7 +1436,9 @@ void UDBCombatComponent::SweepAttack(
 			{
 				if (Attack == EDBAttackId::Launcher)
 				{
-					Victim->LaunchCharacter(FVector(0, 0, 850), true, true);
+					// Start both arcs at contact instead of lifting the blade away before it hits.
+					StartLauncherMovement();
+					Victim->LaunchCharacter(FVector(0, 0, LauncherUpwardSpeed), true, true);
 				}
 				else if (Victim->GetCharacterMovement()->IsFalling())
 				{

@@ -142,6 +142,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0.01"))
 	double InputBufferLifetime = 0.18;
 
+	/** Shared upward launch speed for the attacker and the struck enemy. */
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Air", meta = (ClampMin = "0"))
+	float LauncherUpwardSpeed = 1100.0f;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Weapon")
 	TObjectPtr<UDBWeaponData> WeaponData;
 
@@ -236,7 +240,8 @@ private:
 	void TryStartEvade(double Now);
 	void TryStartAttack();
 	void UpdateAttackMovement(float DeltaTime);
-	void StartAirMovement(float Duration);
+	void StartAirMovement(float Duration, float UpwardSpeed = 0.0f);
+	void StartLauncherMovement();
 	void HoldAirborne(ACharacter* Attacker);
 	void StopAirMovement();
 	void SampleAttackWindow(float Position);

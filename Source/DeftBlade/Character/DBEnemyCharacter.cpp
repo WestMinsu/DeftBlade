@@ -63,7 +63,8 @@ void ADBEnemyCharacter::BeginPlay()
 
 bool ADBEnemyCharacter::CanAct() const
 {
-	return !HealthComponent->IsDead() && ReactionInstanceId == INDEX_NONE && GetCharacterMovement()->IsMovingOnGround();
+	return !HealthComponent->IsDead() && ReactionInstanceId == INDEX_NONE && GetCharacterMovement()->IsMovingOnGround()
+	       && GetWorld()->GetTimeSeconds() >= LandingRecoveryEndsAt;
 }
 
 void ADBEnemyCharacter::OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode)
@@ -76,6 +77,12 @@ void ADBEnemyCharacter::OnMovementModeChanged(EMovementMode PreviousMovementMode
 	else if (GetCharacterMovement()->IsMovingOnGround())
 	{
 		CombatComponent->HandleLanding();
+		if (PreviousMovementMode == MOVE_Falling && bRecoverAfterLanding)
+		{
+			LandingRecoveryEndsAt = GetWorld()->GetTimeSeconds() + LandingRecoveryDuration;
+			GetCharacterMovement()->StopMovementImmediately();
+		}
+		bRecoverAfterLanding = false;
 	}
 	if (auto* AI = Cast<ADBEnemyAIController>(GetController()))
 	{
@@ -107,9 +114,14 @@ float ADBEnemyCharacter::TakeDamage(
 	}
 	const auto* AttackerCombat = Causer ? Causer->FindComponentByClass<UDBCombatComponent>() : nullptr;
 	const EDBAttackId Attack = AttackerCombat ? AttackerCombat->GetAttackId() : EDBAttackId::None;
+	if (Attack == EDBAttackId::Launcher || GetCharacterMovement()->IsFalling())
+	{
+		bRecoverAfterLanding = true;
+	}
 	const bool bForceReaction = Attack == EDBAttackId::Launcher || Attack == EDBAttackId::AirHeavy;
 	if (!bForceReaction && GetCharacterMovement()->IsMovingOnGround()
-	    && (ReactionInstanceId != INDEX_NONE || GetWorld()->GetTimeSeconds() < NextHitReactionAt))
+	    && (ReactionInstanceId != INDEX_NONE || GetWorld()->GetTimeSeconds() < NextHitReactionAt
+	        || GetWorld()->GetTimeSeconds() < LandingRecoveryEndsAt))
 	{
 		return Applied;
 	}

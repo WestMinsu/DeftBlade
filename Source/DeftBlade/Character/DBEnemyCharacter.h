@@ -68,6 +68,9 @@ protected:
 	/** Recovery grants a short interval where ordinary hits deal damage without another flinch. */
 	UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0"))
 	float HitReactionCooldown = 1.5f;
+	/** Game seconds without AI actions after landing from a combat launch or an airborne hit. */
+	UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0"))
+	float LandingRecoveryDuration = 0.5f;
 
 private:
 	void UpdateHealthText(float Current, float Maximum);
@@ -78,4 +81,6 @@ private:
 	void ReactionEnded(UAnimMontage* Montage, bool bInterrupted, int32 InstanceId);
 	int32 ReactionInstanceId = INDEX_NONE;
 	double NextHitReactionAt = 0.0;
+	double LandingRecoveryEndsAt = 0.0;
+	bool bRecoverAfterLanding = false;
 };
