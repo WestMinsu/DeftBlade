@@ -73,14 +73,33 @@ void ADBEnemyCharacter::OnMovementModeChanged(EMovementMode PreviousMovementMode
 	if (GetCharacterMovement()->IsFalling())
 	{
 		StopReaction();
+		if (bRecoverAfterLanding && AirHitReactionMontage)
+		{
+			if (UAnimInstance* Anim = GetMesh()->GetAnimInstance())
+			{
+				Anim->Montage_Play(AirHitReactionMontage);
+			}
+		}
 	}
 	else if (GetCharacterMovement()->IsMovingOnGround())
 	{
 		CombatComponent->HandleLanding();
+		if (PreviousMovementMode == MOVE_Falling)
+		{
+			StopReaction();
+		}
 		if (PreviousMovementMode == MOVE_Falling && bRecoverAfterLanding)
 		{
 			LandingRecoveryEndsAt = GetWorld()->GetTimeSeconds() + LandingRecoveryDuration;
 			GetCharacterMovement()->StopMovementImmediately();
+			if (UAnimInstance* Anim = GetMesh()->GetAnimInstance(); Anim && LandingRecoveryMontage
+			                                                        && LandingRecoveryDuration > 0.0f
+			                                                        && LandingRecoveryMontage->RateScale > 0.0f)
+			{
+				const float PlayRate = LandingRecoveryMontage->GetPlayLength()
+				                       / (LandingRecoveryDuration * LandingRecoveryMontage->RateScale);
+				Anim->Montage_Play(LandingRecoveryMontage, PlayRate);
+			}
 		}
 		bRecoverAfterLanding = false;
 	}
@@ -125,7 +144,7 @@ float ADBEnemyCharacter::TakeDamage(
 	{
 		return Applied;
 	}
-	PlayHitReaction(HitReactionMontage);
+	PlayHitReaction(GetCharacterMovement()->IsFalling() ? AirHitReactionMontage : HitReactionMontage);
 	return Applied;
 }
 
@@ -150,11 +169,16 @@ void ADBEnemyCharacter::PlayHitReaction(UAnimMontage* Montage)
 	GetCharacterMovement()->Velocity.Z = FallingSpeed;
 	StopReaction();
 	if (UAnimInstance* Anim = GetMesh()->GetAnimInstance();
-	    Anim && GetCharacterMovement()->IsMovingOnGround() && Montage && Anim->Montage_Play(Montage) > 0)
+	    Anim && Montage && (GetCharacterMovement()->IsMovingOnGround() || GetCharacterMovement()->IsFalling())
+	    && Anim->Montage_Play(Montage) > 0)
 	{
-		auto* Instance = Anim->GetActiveInstanceForMontage(Montage);
-		ReactionInstanceId = Instance->GetInstanceID();
-		Instance->OnMontageEnded.BindUObject(this, &ThisClass::ReactionEnded, ReactionInstanceId);
+		// Air flinches are pose feedback; only ground hit reactions own this action lock/cooldown.
+		if (GetCharacterMovement()->IsMovingOnGround())
+		{
+			auto* Instance = Anim->GetActiveInstanceForMontage(Montage);
+			ReactionInstanceId = Instance->GetInstanceID();
+			Instance->OnMontageEnded.BindUObject(this, &ThisClass::ReactionEnded, ReactionInstanceId);
+		}
 	}
 	if (auto* AI = Cast<ADBEnemyAIController>(GetController()))
 	{
@@ -170,6 +194,13 @@ void ADBEnemyCharacter::StopReaction()
 		{
 			Instance->OnMontageEnded.Unbind();
 			Anim->Montage_Stop(0.08f, Instance->Montage);
+		}
+		for (UAnimMontage* Visual : {AirHitReactionMontage.Get(), LandingRecoveryMontage.Get()})
+		{
+			if (Visual)
+			{
+				Anim->Montage_Stop(0.08f, Visual);
+			}
 		}
 	}
 	ReactionInstanceId = INDEX_NONE;

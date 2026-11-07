@@ -65,6 +65,11 @@ protected:
 	TObjectPtr<UAnimMontage> HitReactionMontage;
 	UPROPERTY(EditDefaultsOnly, Category = "Animation")
 	TObjectPtr<UAnimMontage> ParryReactionMontage;
+	/** Visual flinch only; airborne movement and the landing recovery deadline remain authoritative. */
+	UPROPERTY(EditDefaultsOnly, Category = "Animation")
+	TObjectPtr<UAnimMontage> AirHitReactionMontage;
+	UPROPERTY(EditDefaultsOnly, Category = "Animation")
+	TObjectPtr<UAnimMontage> LandingRecoveryMontage;
 	/** Recovery grants a short interval where ordinary hits deal damage without another flinch. */
 	UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0"))
 	float HitReactionCooldown = 1.5f;
