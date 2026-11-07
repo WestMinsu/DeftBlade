@@ -19,6 +19,7 @@
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "TimerManager.h"
+#include "UI/DBPlayerHUD.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogDBPlayer, Log, All);
 
@@ -201,9 +202,9 @@ void ADBPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	}
 	if (!MoveAction || !GamepadMoveAction || !MouseLookAction || !GamepadLookAction || !JumpAction || !WalkAction
 	    || !EvadeAction || !LightAttackAction || !HeavyAttackAction || !LockOnAction || !SwitchTargetAction
-	    || !SwitchWeaponAction)
+	    || !SwitchWeaponAction || !PauseAction)
 	{
-		UE_LOG(LogDBPlayer, Error, TEXT("Assign all twelve input actions on %s's Blueprint defaults."), *GetName());
+		UE_LOG(LogDBPlayer, Error, TEXT("Assign all thirteen input actions on %s's Blueprint defaults."), *GetName());
 		return;
 	}
 
@@ -233,6 +234,37 @@ void ADBPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	Input->BindAction(EvadeAction, ETriggerEvent::Canceled, this, &ThisClass::StopSprinting);
 	Input->BindAction(LightAttackAction, ETriggerEvent::Started, this, &ThisClass::LightAttack);
 	Input->BindAction(HeavyAttackAction, ETriggerEvent::Started, this, &ThisClass::HeavyAttack);
+	Input->BindAction(PauseAction, ETriggerEvent::Started, this, &ThisClass::PauseGame);
+}
+
+void ADBPlayerCharacter::PauseGame()
+{
+	if (const auto* PC = Cast<APlayerController>(Controller))
+	{
+		if (auto* HUD = PC->GetHUD<ADBPlayerHUD>())
+		{
+			HUD->PauseGame();
+		}
+	}
+}
+
+void ADBPlayerCharacter::ResetGameplayInput()
+{
+	TargetingComponent->ClearLockOn();
+	CombatComponent->ResetCombat();
+	StopJumpMontages();
+	StopJumping();
+	ResetMovementInput();
+	ConsumeMovementInputVector();
+	auto* Movement = GetCharacterMovement();
+	const double FallingSpeed = Movement->IsFalling() ? Movement->Velocity.Z : 0.0;
+	Movement->StopMovementImmediately();
+	Movement->Velocity.Z = FallingSpeed;
+	if (auto* PC = Cast<APlayerController>(Controller))
+	{
+		PC->RotationInput = FRotator::ZeroRotator;
+		PC->FlushPressedKeys();
+	}
 }
 
 void ADBPlayerCharacter::LightAttack()

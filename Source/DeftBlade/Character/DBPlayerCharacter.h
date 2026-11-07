@@ -24,6 +24,8 @@ class DEFTBLADE_API ADBPlayerCharacter : public ACharacter
 
 public:
 	ADBPlayerCharacter();
+	/** Release held input/actions for menus and focus loss without restoring airborne budgets. */
+	void ResetGameplayInput();
 	virtual void PawnClientRestart() override;
 	virtual void UnPossessed() override;
 	virtual float TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent, AController* EventInstigator,
@@ -103,6 +105,8 @@ protected:
 	TObjectPtr<UInputAction> SwitchTargetAction;
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> SwitchWeaponAction;
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> PauseAction;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Movement", meta = (ClampMin = "0"))
 	float RunSpeed = 600.0f;
@@ -136,6 +140,7 @@ private:
 	void LightAttack();
 	void HeavyAttack();
 	void SwitchWeapon();
+	void PauseGame();
 	void MoveGamepad(const FInputActionValue& Value);
 	void StopGamepadMovement();
 	void AddDirectionalMovement(const FVector2D& Axes);

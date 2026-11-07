@@ -23,7 +23,6 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/RootMotionSource.h"
 #include "GenericTeamAgentInterface.h"
-#include "Misc/CoreDelegates.h"
 #include "Kismet/GameplayStatics.h"
 #include "Particles/ParticleSystem.h"
 #include "Sound/SoundBase.h"
@@ -156,7 +155,6 @@ bool UDBCombatComponent::CanEquipWeapon(const UDBWeaponData* NewWeapon) const
 void UDBCombatComponent::BeginPlay()
 {
 	Super::BeginPlay();
-	FCoreDelegates::ApplicationWillDeactivateDelegate.AddUObject(this, &ThisClass::ResetCombat);
 	USkeletalMeshComponent* Mesh = CastChecked<ACharacter>(GetOwner())->GetMesh();
 	PoseFinalizedHandle = Mesh->RegisterOnBoneTransformsFinalizedDelegate(
 	    FOnBoneTransformsFinalizedMultiCast::FDelegate::CreateUObject(this, &ThisClass::BonesFinalized));
@@ -404,6 +402,11 @@ void UDBCombatComponent::TickComponent(
 	if (ParryHitStopEndsAt != 0.0 && FPlatformTime::Seconds() >= ParryHitStopEndsAt)
 	{
 		StopParryHitStop();
+	}
+	// Player menus clear player actions explicitly; paused enemies retain their committed attacks.
+	if (GetWorld()->IsPaused() && !CastChecked<ACharacter>(GetOwner())->IsPlayerControlled())
+	{
+		return;
 	}
 	if (!CanProcessInput())
 	{
@@ -1483,7 +1486,6 @@ void UDBCombatComponent::ResetCombat()
 
 void UDBCombatComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	FCoreDelegates::ApplicationWillDeactivateDelegate.RemoveAll(this);
 	if (ACharacter* Character = Cast<ACharacter>(GetOwner()))
 	{
 		Character->GetMesh()->UnregisterOnBoneTransformsFinalizedDelegate(PoseFinalizedHandle);

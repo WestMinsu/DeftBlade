@@ -10,6 +10,9 @@ UCLASS()
 class DEFTBLADE_API ADBPlayerHUD : public AHUD
 {
 	GENERATED_BODY()
+public:
+	void PauseGame();
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
@@ -18,6 +21,7 @@ protected:
 	TSubclassOf<UDBPlayerHUDWidget> WidgetClass;
 
 private:
+	void ApplicationActivationChanged(bool bActive);
 	UFUNCTION()
 	void PawnChanged(APawn* OldPawn, APawn* NewPawn);
 

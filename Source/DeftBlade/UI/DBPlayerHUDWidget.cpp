@@ -11,12 +11,16 @@
 #include "Components/TextBlock.h"
 #include "GameFramework/PlayerController.h"
 #include "Game/DBCombatEncounter.h"
+#include "Character/DBPlayerCharacter.h"
+#include "Input/Events.h"
 #include "Kismet/GameplayStatics.h"
 
 void UDBPlayerHUDWidget::NativeOnInitialized()
 {
 	Super::NativeOnInitialized();
 	RetryButton->OnClicked.AddDynamic(this, &ThisClass::Retry);
+	ResumeButton->OnClicked.AddDynamic(this, &ThisClass::ResumeGame);
+	RestartButton->OnClicked.AddDynamic(this, &ThisClass::Retry);
 }
 
 void UDBPlayerHUDWidget::NativeConstruct()
@@ -37,12 +41,14 @@ void UDBPlayerHUDWidget::BindHealth(UDBHealthComponent* Health)
 		HealthSource->OnHealthChanged.RemoveAll(this);
 		HealthSource->OnDeath.RemoveAll(this);
 	}
-	ReleaseResultInput();
+	ReleaseMenuInput();
 	bRetryRequested = false;
 	StopAnimation(DamageFlashAnimation);
 	DamageFlash->SetRenderOpacity(0);
 	ResultPanel->SetVisibility(ESlateVisibility::Collapsed);
+	PausePanel->SetVisibility(ESlateVisibility::Collapsed);
 	RetryButton->SetIsEnabled(true);
+	RestartButton->SetIsEnabled(true);
 	HealthSource = Health;
 	TargetingSource = Health ? Health->GetOwner()->FindComponentByClass<UDBTargetingComponent>() : nullptr;
 	LockOnMarker->SetVisibility(ESlateVisibility::Collapsed);
@@ -131,11 +137,12 @@ void UDBPlayerHUDWidget::ShowDeath()
 
 void UDBPlayerHUDWidget::ShowResult(bool bCompleted)
 {
-	if (bShowingResult)
+	if (Screen == EScreen::Result)
 	{
 		return;
 	}
-	bShowingResult = true;
+	ReleaseMenuInput();
+	Screen = EScreen::Result;
 	ResultTitle->SetText(bCompleted ? NSLOCTEXT("DeftBlade", "RunComplete", "TRIAL COMPLETE")
 	                                : NSLOCTEXT("DeftBlade", "Defeated", "DEFEATED"));
 	RetryLabel->SetText(
@@ -150,15 +157,69 @@ void UDBPlayerHUDWidget::ShowResult(bool bCompleted)
 	}
 }
 
-void UDBPlayerHUDWidget::ReleaseResultInput()
+void UDBPlayerHUDWidget::PauseGame()
 {
-	if (!bShowingResult)
+	auto* PC = GetOwningPlayer();
+	if (Screen != EScreen::Gameplay || !PC || !HealthSource.IsValid() || HealthSource->IsDead())
 	{
 		return;
 	}
-	bShowingResult = false;
+	if (auto* Player = Cast<ADBPlayerCharacter>(PC->GetPawn()))
+	{
+		Player->ResetGameplayInput();
+	}
+	if (!PC->SetPause(true))
+	{
+		return;
+	}
+	Screen = EScreen::Pause;
+	PausePanel->SetVisibility(ESlateVisibility::Visible);
+	PC->SetInputMode(FInputModeUIOnly().SetWidgetToFocus(ResumeButton->TakeWidget()));
+	PC->bShowMouseCursor = true;
+	ResumeButton->SetUserFocus(PC);
+}
+
+void UDBPlayerHUDWidget::ResumeGame()
+{
+	if (Screen == EScreen::Pause)
+	{
+		ReleaseMenuInput();
+	}
+}
+
+FReply UDBPlayerHUDWidget::NativeOnPreviewKeyDown(const FGeometry& Geometry, const FKeyEvent& Event)
+{
+	if (Screen != EScreen::Gameplay
+	    && (Event.GetKey() == EKeys::Escape || Event.GetKey() == EKeys::Gamepad_Special_Right))
+	{
+		if (Screen == EScreen::Pause && !Event.IsRepeat())
+		{
+			ResumeGame();
+		}
+		return FReply::Handled();
+	}
+	return Super::NativeOnPreviewKeyDown(Geometry, Event);
+}
+
+void UDBPlayerHUDWidget::ReleaseMenuInput()
+{
+	if (Screen == EScreen::Gameplay)
+	{
+		return;
+	}
+	const bool bPaused = Screen == EScreen::Pause;
+	Screen = EScreen::Gameplay;
+	PausePanel->SetVisibility(ESlateVisibility::Collapsed);
 	if (APlayerController* PC = GetOwningPlayer())
 	{
+		if (auto* Player = Cast<ADBPlayerCharacter>(PC->GetPawn()))
+		{
+			Player->ResetGameplayInput();
+		}
+		if (bPaused)
+		{
+			PC->SetPause(false);
+		}
 		PC->SetInputMode(FInputModeGameOnly());
 		PC->bShowMouseCursor = false;
 		PC->FlushPressedKeys();
@@ -168,13 +229,15 @@ void UDBPlayerHUDWidget::ReleaseResultInput()
 void UDBPlayerHUDWidget::Retry()
 {
 	const bool bCompleted = EncounterSource.IsValid() && EncounterSource->GetState() == EDBEncounterState::Completed;
-	if (bRetryRequested || !HealthSource.IsValid() || (!HealthSource->IsDead() && !bCompleted))
+	if (bRetryRequested || !HealthSource.IsValid()
+	    || (Screen != EScreen::Pause && !HealthSource->IsDead() && !bCompleted))
 	{
 		return;
 	}
 	bRetryRequested = true;
 	RetryButton->SetIsEnabled(false);
-	ReleaseResultInput();
+	RestartButton->SetIsEnabled(false);
+	ReleaseMenuInput();
 	UGameplayStatics::OpenLevel(this, FName(*UGameplayStatics::GetCurrentLevelName(this, true)));
 }
 
@@ -188,8 +251,26 @@ void UDBPlayerHUDWidget::NativeDestruct()
 void UDBPlayerHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
+	if (bRestoreMenuFocus)
+	{
+		// Activation can overwrite the first attempt; finish once focus survives to the next tick.
+		APlayerController* PC = GetOwningPlayer();
+		if (Screen != EScreen::Gameplay && PC)
+		{
+			UButton* MenuButton = Screen == EScreen::Pause ? ResumeButton : RetryButton;
+			bRestoreMenuFocus = !MenuButton->HasUserFocus(PC);
+			if (bRestoreMenuFocus)
+			{
+				MenuButton->SetUserFocus(PC);
+			}
+		}
+		else
+		{
+			bRestoreMenuFocus = false;
+		}
+	}
 	FVector2D Position;
-	if (!bShowingResult && TargetingSource.IsValid() && TargetingSource->IsLockedOn()
+	if (Screen == EScreen::Gameplay && TargetingSource.IsValid() && TargetingSource->IsLockedOn()
 	    && UWidgetLayoutLibrary::ProjectWorldLocationToWidgetPosition(
 	        GetOwningPlayer(), TargetingSource->GetTargetPoint(), Position, true))
 	{
