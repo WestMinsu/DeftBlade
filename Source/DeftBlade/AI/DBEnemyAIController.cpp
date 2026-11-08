@@ -8,8 +8,11 @@
 #include "Character/DBPlayerCharacter.h"
 #include "Combat/DBCombatComponent.h"
 #include "Combat/DBHealthComponent.h"
+#include "Combat/DBTargetingComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "EngineUtils.h"
+#include "GameFramework/PlayerController.h"
 #include "Navigation/PathFollowingComponent.h"
 #include "NavigationSystem.h"
 #include "Perception/AIPerceptionComponent.h"
@@ -66,6 +69,8 @@ void ADBEnemyAIController::ForgetTarget()
 		}
 	}
 	TrackedTarget.Reset();
+	bHasClosePressure = false;
+	ReconsiderPressureAt = PressureHeldUntil = HitPressureUntil = 0.0;
 	ClearFocus(EAIFocusPriority::Gameplay);
 	bHasSight = false;
 	SearchStartedAt = -1;
@@ -133,6 +138,8 @@ void ADBEnemyAIController::RememberAttacker(AActor* Attacker)
 		Health->OnDeath.AddUObject(this, &ThisClass::ForgetTarget);
 	}
 	LastSeenLocation = Attacker->GetActorLocation();
+	HitPressureUntil = GetWorld()->GetTimeSeconds() + 1.0;
+	ReconsiderPressureAt = 0.0;
 	SearchStartedAt = -1;
 	// Keep existing sight. A newly remembered attacker still needs the sight sense to acquire it.
 	GetPerceptionComponent()->RequestStimuliListenerUpdate();
@@ -181,6 +188,7 @@ void ADBEnemyAIController::RefreshCombatState()
 		SearchStartedAt = -1;
 	}
 	AActor* Target = bHasSight || bCommittedAttack ? TrackedTarget.Get() : nullptr;
+	UpdateClosePressure();
 	const bool bInRange = Target && Enemy
 	                      && FVector::DistSquared2D(Enemy->GetActorLocation(), Target->GetActorLocation())
 	                             <= FMath::Square(Enemy->GetAttackRange());
@@ -200,6 +208,8 @@ void ADBEnemyAIController::RefreshCombatState()
 	}
 	// Activating a BT branch can start MoveTo immediately; publish its goal first.
 	Blackboard->SetValueAsVector(DBEnemyBB::LastKnownLocation, MoveGoal);
+	Blackboard->SetValueAsVector(
+	    DBEnemyBB::CombatLocation, Enemy && bHasSight ? GetCombatLocation(MoveGoal) : MoveGoal);
 	Blackboard->SetValueAsBool(DBEnemyBB::CanAct, bCanAct);
 	Blackboard->SetValueAsObject(DBEnemyBB::Target, Target);
 	Blackboard->SetValueAsBool(DBEnemyBB::HasLastKnownLocation, TrackedTarget.IsValid());
@@ -210,7 +220,7 @@ void ADBEnemyAIController::RefreshCombatState()
 
 bool ADBEnemyAIController::CanStartAttack() const
 {
-	if (!TrackedTarget.IsValid() || !bHasSight || GetWorld()->GetTimeSeconds() < NextAttackAt)
+	if (!TrackedTarget.IsValid() || !bHasSight || !bHasClosePressure || GetWorld()->GetTimeSeconds() < NextAttackAt)
 	{
 		return false;
 	}
@@ -226,6 +236,167 @@ bool ADBEnemyAIController::CanStartAttack() const
 		}
 	}
 	return true;
+}
+
+void ADBEnemyAIController::UpdateClosePressure()
+{
+	const double Now = GetWorld()->GetTimeSeconds();
+	if (!TrackedTarget.IsValid() || Now < ReconsiderPressureAt)
+	{
+		return;
+	}
+	ReconsiderPressureAt = Now + .35;
+	struct FCandidate
+	{
+		ADBEnemyAIController* AI;
+		int32 Priority;
+		float Score;
+	};
+	TArray<FCandidate> Candidates;
+	const auto* Player = Cast<APawn>(TrackedTarget.Get());
+	const auto* PC = Player ? Cast<APlayerController>(Player->GetController()) : nullptr;
+	const auto* Targeting = Player ? Player->FindComponentByClass<UDBTargetingComponent>() : nullptr;
+	int32 Width = 0, Height = 0;
+	if (PC)
+	{
+		PC->GetViewportSize(Width, Height);
+	}
+	for (TActorIterator<ADBEnemyAIController> It(GetWorld()); It; ++It)
+	{
+		ADBEnemyAIController* AI = *It;
+		if (AI->TrackedTarget != TrackedTarget)
+		{
+			continue;
+		}
+		auto* Enemy = Cast<ADBEnemyCharacter>(AI->GetPawn());
+		if (!Enemy || Enemy->FindComponentByClass<UDBHealthComponent>()->IsDead())
+		{
+			continue;
+		}
+		const auto* Combat = Enemy->FindComponentByClass<UDBCombatComponent>();
+		const bool bAttacking = Combat && (Combat->IsAttacking() || AI->HasCommittedAttack());
+		const bool bEngaged = Now < AI->HitPressureUntil || (AI->bHasClosePressure && !Enemy->CanAct());
+		if (!AI->bHasSight && !bAttacking && !bEngaged)
+		{
+			AI->bHasClosePressure = false;
+			continue;
+		}
+		const int32 Priority = bAttacking                                             ? 3
+		                       : bEngaged                                             ? 2
+		                       : AI->bHasClosePressure && Now < AI->PressureHeldUntil ? 1
+		                                                                              : 0;
+		// Use this enemy's knowledge, never an unseen target's current position.
+		float Score = -FVector::Dist2D(Enemy->GetActorLocation(), AI->LastSeenLocation);
+		FVector2D Screen;
+		if (PC && Width > 0 && Height > 0 && PC->ProjectWorldLocationToScreen(Enemy->GetActorLocation(), Screen)
+		    && Screen.X >= 0 && Screen.Y >= 0 && Screen.X <= Width && Screen.Y <= Height)
+		{
+			Score += 180.0f;
+		}
+		if (Targeting && Targeting->GetLockedTarget() == Enemy)
+		{
+			Score += 250.0f;
+		}
+		if (AI->bHasClosePressure)
+		{
+			Score += 60.0f;
+		}
+		Candidates.Add({AI, Priority, Score});
+	}
+	Candidates.Sort(
+	    [](const FCandidate& A, const FCandidate& B)
+	    {
+		    if (A.Priority != B.Priority)
+		    {
+			    return A.Priority > B.Priority;
+		    }
+		    return A.Score == B.Score ? A.AI->GetUniqueID() < B.AI->GetUniqueID() : A.Score > B.Score;
+	    });
+	for (int32 Index = 0; Index < Candidates.Num(); ++Index)
+	{
+		ADBEnemyAIController* AI = Candidates[Index].AI;
+		const bool bSelected = Index < 2;
+		if (bSelected && !AI->bHasClosePressure)
+		{
+			AI->PressureHeldUntil = Now + 1.25;
+		}
+		AI->bHasClosePressure = bSelected;
+		// Any group member may refresh the group, but they share one short evaluation interval.
+		AI->ReconsiderPressureAt = Now + .35;
+	}
+}
+
+FVector ADBEnemyAIController::GetCombatLocation(const FVector& GroundTarget) const
+{
+	const auto* Enemy = CastChecked<ADBEnemyCharacter>(GetPawn());
+	const FVector Position = Enemy->GetActorLocation();
+	const auto* Player = Cast<ACharacter>(TrackedTarget.Get());
+	const float BodyGap = Enemy->GetCapsuleComponent()->GetScaledCapsuleRadius()
+	                      + (Player ? Player->GetCapsuleComponent()->GetScaledCapsuleRadius() : 34.0f) + 16.0f;
+	// Short fist reach limits the body gap; never stop outside the authored attack range.
+	const float NearDistance =
+	    FMath::Max(FMath::Min(BodyGap, Enemy->GetAttackRange() - 10.0f), Enemy->GetAttackRange() - 50.0f);
+	const float Distance = bHasClosePressure ? NearDistance : FMath::Max(OuterDistance, NearDistance + 180.0f);
+	FVector Direction = (Position - GroundTarget).GetSafeNormal2D();
+	if (Direction.IsNearlyZero())
+	{
+		Direction = -Enemy->GetActorForwardVector();
+	}
+	TArray<FVector> Neighbors;
+	for (TActorIterator<ADBEnemyCharacter> It(GetWorld()); It; ++It)
+	{
+		if (*It != Enemy && !It->FindComponentByClass<UDBHealthComponent>()->IsDead())
+		{
+			Neighbors.Add(It->GetActorLocation());
+		}
+	}
+	auto HasSpace = [&](const FVector& Point)
+	{
+		return !Neighbors.ContainsByPredicate(
+		    [&](const FVector& Other)
+		    {
+			    return FVector::DistSquared2D(Point, Other) < FMath::Square(EnemySeparation);
+		    });
+	};
+	auto FitsZone = [&](const FVector& Point, bool bCurrentPosition = false)
+	{
+		const FVector Offset = Point - GroundTarget;
+		const float Maximum = bHasClosePressure ? FMath::Min(Distance + 30.0f,
+		                                              Enemy->GetAttackRange() - (bCurrentPosition ? 0.0f : 10.0f))
+		                                        : Distance + 30.0f;
+		return Offset.Size2D() >= Distance - 30.0f && Offset.Size2D() <= Maximum
+		       && FVector::DotProduct(Offset.GetSafeNormal2D(), Direction) >= .2f && HasSpace(Point);
+	};
+	// A valid position is enough. Preserve it instead of orbiting toward a new optimum every update.
+	if (FitsZone(Position, true))
+	{
+		return Position;
+	}
+	if (Blackboard->IsVectorValueSet(DBEnemyBB::CombatLocation))
+	{
+		const FVector Previous = Blackboard->GetValueAsVector(DBEnemyBB::CombatLocation);
+		if (FitsZone(Previous))
+		{
+			return Previous;
+		}
+	}
+	if (auto* Navigation = FNavigationSystem::GetCurrent<UNavigationSystemV1>(GetWorld()))
+	{
+		const ANavigationData* NavData = Navigation->GetNavDataForProps(Enemy->GetNavAgentPropertiesRef(), Position);
+		for (float Angle : {0.0f, 25.0f, -25.0f, 50.0f, -50.0f, 75.0f, -75.0f})
+		{
+			const FVector Desired = GroundTarget + Direction.RotateAngleAxis(Angle, FVector::UpVector) * Distance;
+			FNavLocation Projected;
+			if (NavData && Navigation->ProjectPointToNavigation(Desired, Projected, FVector(60, 60, 150), NavData)
+			    && FitsZone(Projected.Location)
+			    && Navigation->TestPathSync(FPathFindingQuery(this, *NavData, Position, Projected.Location)))
+			{
+				return Projected.Location;
+			}
+		}
+	}
+	// A narrow or blocked area must not produce an unreachable goal or a path through the player.
+	return Position;
 }
 
 bool ADBEnemyAIController::HasCommittedAttack() const

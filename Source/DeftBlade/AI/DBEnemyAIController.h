@@ -11,6 +11,7 @@ namespace DBEnemyBB
 {
 	inline const FName Target = TEXT("Target");
 	inline const FName LastKnownLocation = TEXT("LastKnownLocation");
+	inline const FName CombatLocation = TEXT("CombatLocation");
 	inline const FName HasLastKnownLocation = TEXT("HasLastKnownLocation");
 	inline const FName CanAct = TEXT("CanAct");
 	inline const FName CanAttack = TEXT("CanAttack");
@@ -44,12 +45,23 @@ protected:
 	/** Game seconds after this enemy's last hit window before an ally may start its preparation. */
 	UPROPERTY(EditDefaultsOnly, Category = "AI", meta = (ClampMin = "0"))
 	float GroupAttackRecovery = 0.20f;
+	UPROPERTY(EditDefaultsOnly, Category = "AI|Spacing", meta = (ClampMin = "200"))
+	float OuterDistance = 420.0f;
+	UPROPERTY(EditDefaultsOnly, Category = "AI|Spacing", meta = (ClampMin = "84"))
+	float EnemySeparation = 140.0f;
 
 private:
 	UFUNCTION()
 	void PerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
 	void ForgetTarget();
 	bool HasCommittedAttack() const;
+	void UpdateClosePressure();
+	FVector GetCombatLocation(const FVector& GroundTarget) const;
+	UPROPERTY(VisibleInstanceOnly, Category = "AI|Spacing")
+	bool bHasClosePressure = false;
+	double ReconsiderPressureAt = 0.0;
+	double PressureHeldUntil = 0.0;
+	double HitPressureUntil = 0.0;
 	TWeakObjectPtr<AActor> TrackedTarget;
 	bool bHasSight = false;
 	double SearchStartedAt = -1;
