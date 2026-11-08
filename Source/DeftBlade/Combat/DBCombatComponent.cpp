@@ -8,6 +8,7 @@
 #include "Combat/DBCollisionChannels.h"
 #include "Combat/DBHealthComponent.h"
 #include "Combat/DBTargetingComponent.h"
+#include "Components/AudioComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -1334,6 +1335,13 @@ bool UDBCombatComponent::TryParry(UDBCombatComponent& Attacker, const FVector& I
 	}
 	ParryWindowEndsAt = 0.0;
 	GetOwner()->SetActorRotation(ParryDirection.Rotation());
+	// The same light swing may damage the enemy just after the clash. Give the parry a clear beat.
+	HitFeedbackSuppressedUntil = FPlatformTime::Seconds() + 0.14;
+	if (LastHitSound.IsValid())
+	{
+		LastHitSound->Stop();
+		LastHitSound.Reset();
+	}
 	if (ParryEffect)
 	{
 		UGameplayStatics::SpawnEmitterAtLocation(GetWorld(), ParryEffect, ImpactPoint);
@@ -1428,9 +1436,25 @@ void UDBCombatComponent::SweepAttack(
 			}
 			const bool bResistsLaunch = VictimCombat && VictimCombat->HasAttackStaggerResistance();
 			const EDBAttackId Attack = ActiveAttack.Id;
+			// Damage callbacks can finish/switch this action; retain the contact's authored feedback.
+			UParticleSystem* HitEffect = ActiveAttack.HitEffect;
+			USoundBase* HitSound = ActiveAttack.HitSound;
+			const float HitEffectScale = ActiveAttack.HitEffectScale;
 			const float Applied = UGameplayStatics::ApplyPointDamage(Target, ActiveAttack.Damage,
 			    (To.TransformPosition(Local) - From.TransformPosition(Local)).GetSafeNormal(), Hit,
 			    CastChecked<ACharacter>(GetOwner())->GetController(), GetOwner(), nullptr);
+			if (Applied > 0.0f && FPlatformTime::Seconds() >= HitFeedbackSuppressedUntil)
+			{
+				if (HitEffect)
+				{
+					UGameplayStatics::SpawnEmitterAtLocation(
+					    GetWorld(), HitEffect, Hit.ImpactPoint, Hit.ImpactNormal.Rotation(), FVector(HitEffectScale));
+				}
+				if (HitSound)
+				{
+					LastHitSound = UGameplayStatics::SpawnSoundAtLocation(this, HitSound, Hit.ImpactPoint);
+				}
+			}
 			ACharacter* Victim = Cast<ACharacter>(Target);
 			if (Applied > 0.0f && IsValid(Victim) && !Health->IsDead() && ActiveActionId == ActionId && !bResistsLaunch)
 			{

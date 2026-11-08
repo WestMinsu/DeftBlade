@@ -8,6 +8,8 @@ class UAnimInstance;
 class UAnimMontage;
 class UAnimSequence;
 class UBlendSpace;
+class UParticleSystem;
+class USoundBase;
 class UStaticMesh;
 
 UENUM(BlueprintType)
@@ -113,6 +115,16 @@ struct FDBAttackDefinition
 
 	UPROPERTY(EditAnywhere, meta = (ClampMin = "0.01"))
 	float Damage = 25.0f;
+
+	/** Optional feedback at an accepted damage contact, including a killing blow. */
+	UPROPERTY(EditAnywhere, Category = "Hit Feedback")
+	TObjectPtr<UParticleSystem> HitEffect;
+
+	UPROPERTY(EditAnywhere, Category = "Hit Feedback")
+	TObjectPtr<USoundBase> HitSound;
+
+	UPROPERTY(EditAnywhere, Category = "Hit Feedback", meta = (ClampMin = "0.01"))
+	float HitEffectScale = 1.0f;
 
 	bool IsValid() const;
 };

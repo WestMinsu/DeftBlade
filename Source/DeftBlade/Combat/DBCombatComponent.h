@@ -6,6 +6,7 @@
 #include "DBCombatComponent.generated.h"
 
 class ACharacter;
+class UAudioComponent;
 class UAnimMontage;
 class UCurveFloat;
 class UParticleSystem;
@@ -308,6 +309,9 @@ private:
 	FVector ParryDirection = FVector::ForwardVector;
 	double ParryHitStopEndsAt = 0.0;
 	float TimeDilationBeforeParry = 1.0f;
+	/** Real-time presentation priority; damage and combo progression remain unchanged. */
+	double HitFeedbackSuppressedUntil = 0.0;
+	TWeakObjectPtr<UAudioComponent> LastHitSound;
 	bool bAttackMovementStarted = false;
 	bool bAttackLanded = false;
 };
