@@ -116,6 +116,10 @@ struct FDBAttackDefinition
 	UPROPERTY(EditAnywhere, meta = (ClampMin = "0.01"))
 	float Damage = 25.0f;
 
+	/** Horizontal displacement over a short hit reaction; zero disables it. */
+	UPROPERTY(EditAnywhere, meta = (ClampMin = "0", Units = "cm"))
+	float GroundKnockbackDistance = 0.0f;
+
 	/** Optional feedback at an accepted damage contact, including a killing blow. */
 	UPROPERTY(EditAnywhere, Category = "Hit Feedback")
 	TObjectPtr<UParticleSystem> HitEffect;

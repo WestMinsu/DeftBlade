@@ -1478,6 +1478,44 @@ void UDBCombatComponent::SweepAttack(
 						}
 					}
 				}
+				else if (ActiveAttack.GroundKnockbackDistance > 0.0f
+				         && Victim->GetCharacterMovement()->IsMovingOnGround())
+				{
+					const FVector Away = (Victim->GetActorLocation() - GetOwner()->GetActorLocation())
+					                         .GetSafeNormal2D(UE_SMALL_NUMBER, GetOwner()->GetActorForwardVector());
+					auto* Movement = Victim->GetCharacterMovement();
+					TSharedPtr<FRootMotionSource_ConstantForce> Motion = MakeShared<FRootMotionSource_ConstantForce>();
+					Motion->InstanceName = TEXT("DBGroundKnockback");
+					Motion->Priority = 100;
+					Motion->AccumulateMode = ERootMotionAccumulateMode::Override;
+					Motion->Duration = .18f;
+					Motion->Force = Away * (ActiveAttack.GroundKnockbackDistance / Motion->Duration);
+					Motion->Settings.SetFlag(ERootMotionSourceSettingsFlags::IgnoreZAccumulate);
+					Motion->Settings.UnSetFlag(ERootMotionSourceSettingsFlags::DisablePartialEndTick);
+					// End horizontal motion without slowing a fall if collision carries the victim off a ledge.
+					Motion->FinishVelocityParams.Mode = ERootMotionFinishVelocityMode::ClampVelocity;
+					Motion->FinishVelocityParams.ClampVelocity = 0.0f;
+					Movement->RemoveRootMotionSource(Motion->InstanceName);
+					Movement->ApplyRootMotionSource(Motion);
+					// Keep both attack poses, while letting the victim's source create real separation.
+					for (UDBCombatComponent* Combat : {this, VictimCombat})
+					{
+						if (!Combat)
+						{
+							continue;
+						}
+						if (UAnimInstance* Anim =
+						        CastChecked<ACharacter>(Combat->GetOwner())->GetMesh()->GetAnimInstance())
+						{
+							if (FAnimMontageInstance* Instance =
+							        Anim->GetMontageInstanceForID(Combat->AttackMontageInstanceId);
+							    Instance && !Instance->IsRootMotionDisabled())
+							{
+								Instance->PushDisableRootMotion();
+							}
+						}
+					}
+				}
 			}
 		}
 	}
@@ -1537,6 +1575,13 @@ void UDBCombatComponent::ResetCombat()
 	}
 	FinishAction(ActiveActionId);
 	StopAirMovement();
+	UCharacterMovementComponent* Movement = CastChecked<ACharacter>(GetOwner())->GetCharacterMovement();
+	if (TSharedPtr<FRootMotionSource> Knockback = Movement->GetRootMotionSource(TEXT("DBGroundKnockback")))
+	{
+		// An interrupting launcher owns its new velocity; only a natural expiration should clamp it.
+		Knockback->FinishVelocityParams.Mode = ERootMotionFinishVelocityMode::MaintainLastRootMotionVelocity;
+		Movement->RemoveRootMotionSource(Knockback->InstanceName);
+	}
 	// Reset also stops any residual blend-out after an interruption.
 	StopEvadeMontage();
 	BufferedAction = {};
