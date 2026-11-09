@@ -54,6 +54,9 @@ struct FDBBufferedAction
 	/** Only set for a switch link; shares the same single pending-input slot. */
 	UPROPERTY()
 	TObjectPtr<UDBWeaponData> Weapon;
+	/** AI-selected opener; player inputs continue to use the authored combo links. */
+	UPROPERTY()
+	EDBAttackId Attack = EDBAttackId::None;
 
 	bool IsExpired(double Now, double Lifetime) const
 	{
@@ -76,6 +79,7 @@ public:
 
 	void RequestEvade();
 	void RequestAttack(bool bHeavy, const FVector& Direction = FVector::ZeroVector);
+	void RequestAttack(EDBAttackId Attack);
 	void RequestJump();
 	void ReactToHit(UAnimMontage* Montage);
 	bool CanJumpFromAction() const;

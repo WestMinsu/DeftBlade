@@ -53,6 +53,10 @@ protected:
 	TObjectPtr<UWidget> LockOnMarker;
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> EncounterText;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UWidget> BossPanel;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UProgressBar> BossHealthBar;
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UWidget> PausePanel;
 	UPROPERTY(meta = (BindWidget))
@@ -63,6 +67,7 @@ protected:
 private:
 	void HealthChanged(float Current, float Maximum);
 	void EncounterChanged();
+	void BossHealthChanged(float Current, float Maximum);
 	void ShowDeath();
 	void ShowResult(bool bCompleted);
 	void ReleaseMenuInput();
@@ -73,6 +78,7 @@ private:
 
 	TWeakObjectPtr<UDBHealthComponent> HealthSource;
 	TWeakObjectPtr<ADBCombatEncounter> EncounterSource;
+	TWeakObjectPtr<UDBHealthComponent> BossHealthSource;
 	TWeakObjectPtr<UDBTargetingComponent> TargetingSource;
 	float PreviousHealth = 0;
 	enum class EScreen : uint8

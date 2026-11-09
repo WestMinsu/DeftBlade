@@ -39,8 +39,9 @@ EBTNodeResult::Type UBTTask_DBMeleeAttack::ExecuteTask(UBehaviorTreeComponent& O
 		return EBTNodeResult::Failed;
 	}
 	AI->StopMovement();
-	bComboAttack = FMath::FRand() < ComboChance;
-	const FDBAttackDefinition* Attack = Combat->FindAttack(bComboAttack ? EDBAttackId::Heavy1 : EDBAttackId::Light1);
+	AttackId = Enemy->SelectAttack(
+	    FVector::Dist2D(Enemy->GetActorLocation(), Target->GetActorLocation()), FMath::FRand() < ComboChance);
+	const FDBAttackDefinition* Attack = Combat->FindAttack(AttackId);
 	if (!Attack || !Attack->IsValid())
 	{
 		return EBTNodeResult::Failed;
@@ -89,7 +90,7 @@ void UBTTask_DBMeleeAttack::TickTask(UBehaviorTreeComponent& OwnerComp, uint8*, 
 		}
 		if (FMath::Abs(FMath::FindDeltaAngleDegrees(Enemy->GetActorRotation().Yaw, DesiredRotation.Yaw)) <= 15.0)
 		{
-			Combat->RequestAttack(bComboAttack);
+			Combat->RequestAttack(AttackId);
 			RequestId = Combat->GetBufferedAction().Id;
 			if (!RequestId)
 			{

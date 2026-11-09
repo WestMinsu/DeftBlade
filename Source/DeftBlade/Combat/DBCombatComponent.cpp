@@ -204,6 +204,21 @@ void UDBCombatComponent::RequestJump()
 	QueueInput(EDBActionInput::Jump);
 }
 
+void UDBCombatComponent::RequestAttack(EDBAttackId Attack)
+{
+	const ACharacter* Character = CastChecked<ACharacter>(GetOwner());
+	const FDBAttackDefinition* Definition = FindAttack(Attack);
+	if (!Character->GetController() || Character->IsPlayerControlled() || !CanProcessInput()
+	    || ActionState != EDBActionState::None || BufferedAction.Id != 0 || !Definition || !Definition->IsValid()
+	    || !IsAttackMovementValid(Attack))
+	{
+		return;
+	}
+	const auto Input = Attack >= EDBAttackId::Light1 && Attack <= EDBAttackId::Light4 ? EDBActionInput::LightAttack
+	                                                                                  : EDBActionInput::HeavyAttack;
+	BufferedAction = {++NextRequestId, GetWorld()->GetTimeSeconds(), Input, nullptr, Attack};
+}
+
 void UDBCombatComponent::QueueInput(EDBActionInput Input, const FVector& Direction, UDBWeaponData* NewWeapon)
 {
 	if (!CanProcessInput())
@@ -279,6 +294,10 @@ void UDBCombatComponent::QueueInput(EDBActionInput Input, const FVector& Directi
 
 EDBAttackId UDBCombatComponent::NextAttack(EDBActionInput Input) const
 {
+	if (BufferedAction.Attack != EDBAttackId::None && Input == BufferedAction.Input)
+	{
+		return BufferedAction.Attack;
+	}
 	if (!IsAttackInput(Input))
 	{
 		return EDBAttackId::None;

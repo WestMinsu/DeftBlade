@@ -11,6 +11,7 @@
 #include "Components/TextBlock.h"
 #include "GameFramework/PlayerController.h"
 #include "Game/DBCombatEncounter.h"
+#include "Character/DBBossCharacter.h"
 #include "Character/DBPlayerCharacter.h"
 #include "Input/Events.h"
 #include "Kismet/GameplayStatics.h"
@@ -81,6 +82,18 @@ void UDBPlayerHUDWidget::HealthChanged(float Current, float Maximum)
 
 void UDBPlayerHUDWidget::BindEncounter(ADBCombatEncounter* Encounter)
 {
+	if (BossHealthSource.IsValid())
+	{
+		BossHealthSource->OnHealthChanged.RemoveAll(this);
+	}
+	BossHealthSource = Encounter && IsValid(Encounter->GetBoss())
+	                       ? Encounter->GetBoss()->FindComponentByClass<UDBHealthComponent>()
+	                       : nullptr;
+	if (BossHealthSource.IsValid())
+	{
+		BossHealthSource->OnHealthChanged.AddUObject(this, &ThisClass::BossHealthChanged);
+		BossHealthChanged(BossHealthSource->GetHealth(), BossHealthSource->GetMaxHealth());
+	}
 	if (EncounterSource.IsValid())
 	{
 		EncounterSource->OnStateChanged.RemoveAll(this);
@@ -95,6 +108,13 @@ void UDBPlayerHUDWidget::BindEncounter(ADBCombatEncounter* Encounter)
 
 void UDBPlayerHUDWidget::EncounterChanged()
 {
+	if (BossPanel)
+	{
+		BossPanel->SetVisibility(
+		    EncounterSource.IsValid() && EncounterSource->GetState() == EDBEncounterState::BossActive
+		        ? ESlateVisibility::HitTestInvisible
+		        : ESlateVisibility::Collapsed);
+	}
 	if (EncounterSource.IsValid() && EncounterSource->GetState() == EDBEncounterState::Completed)
 	{
 		ShowResult(true);
@@ -122,7 +142,12 @@ void UDBPlayerHUDWidget::EncounterChanged()
 			    NSLOCTEXT("DeftBlade", "EncounterReinforcements", "REINFORCEMENTS - Defeat the incoming enemies"));
 			break;
 		case EDBEncounterState::Cleared:
-			EncounterText->SetText(NSLOCTEXT("DeftBlade", "EncounterCleared", "AREA CLEAR - Exit unlocked"));
+			EncounterText->SetText(EncounterSource->GetBoss()
+			                           ? NSLOCTEXT("DeftBlade", "BossAhead", "AREA CLEAR - Proceed to the Warden")
+			                           : NSLOCTEXT("DeftBlade", "EncounterCleared", "AREA CLEAR - Exit unlocked"));
+			break;
+		case EDBEncounterState::BossActive:
+			EncounterText->SetVisibility(ESlateVisibility::Collapsed);
 			break;
 		case EDBEncounterState::Completed:
 			EncounterText->SetVisibility(ESlateVisibility::Collapsed);
@@ -133,6 +158,14 @@ void UDBPlayerHUDWidget::EncounterChanged()
 void UDBPlayerHUDWidget::ShowDeath()
 {
 	ShowResult(false);
+}
+
+void UDBPlayerHUDWidget::BossHealthChanged(float Current, float Maximum)
+{
+	if (BossHealthBar)
+	{
+		BossHealthBar->SetPercent(Maximum > 0.0f ? FMath::Clamp(Current / Maximum, 0.0f, 1.0f) : 0.0f);
+	}
 }
 
 void UDBPlayerHUDWidget::ShowResult(bool bCompleted)

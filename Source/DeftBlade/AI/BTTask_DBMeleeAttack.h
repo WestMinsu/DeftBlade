@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "BehaviorTree/BTTaskNode.h"
+#include "Combat/DBWeaponData.h"
 #include "BTTask_DBMeleeAttack.generated.h"
 
 class UDBCombatComponent;
@@ -27,6 +28,6 @@ private:
 	TWeakObjectPtr<UDBCombatComponent> Combat;
 	uint64 RequestId = 0;
 	double AimStartedAt = 0;
-	bool bComboAttack = false;
+	EDBAttackId AttackId = EDBAttackId::None;
 	bool bStarted = false;
 };

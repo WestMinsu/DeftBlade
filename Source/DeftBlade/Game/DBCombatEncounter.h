@@ -5,6 +5,7 @@
 #include "DBCombatEncounter.generated.h"
 
 class ADBEnemyCharacter;
+class ADBBossCharacter;
 class ADBPlayerCharacter;
 class ATargetPoint;
 class ATriggerBox;
@@ -18,7 +19,8 @@ enum class EDBEncounterState : uint8
 	Active,
 	Cleared,
 	Reinforcements,
-	Completed
+	Completed,
+	BossActive
 };
 
 USTRUCT(BlueprintType)
@@ -48,6 +50,10 @@ public:
 	}
 
 	FSimpleMulticastDelegate OnStateChanged;
+	ADBBossCharacter* GetBoss() const
+	{
+		return Boss;
+	}
 
 protected:
 	virtual void BeginPlay() override;
@@ -64,6 +70,11 @@ protected:
 	/** Optional end area beyond the exit. Enabled only after combat is cleared. */
 	UPROPERTY(EditInstanceOnly, Category = "Encounter")
 	TObjectPtr<ATriggerBox> FinishArea;
+	/** When assigned, FinishArea starts the final fight instead of completing the run. */
+	UPROPERTY(EditInstanceOnly, Category = "Encounter|Boss")
+	TObjectPtr<ADBBossCharacter> Boss;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Encounter|Boss")
+	TObjectPtr<UStaticMeshComponent> BossGate;
 	/** One optional group, spawned behind the side entrance after the assigned enemies fall. */
 	UPROPERTY(EditInstanceOnly, Category = "Encounter|Reinforcements")
 	TArray<FDBReinforcementSpawn> Reinforcements;
@@ -84,6 +95,7 @@ private:
 	void FinishEntered(AActor* Area, AActor* OtherActor);
 	void TryStart(AActor* Actor);
 	void CheckCleared();
+	void BossDefeated();
 	void StartReinforcements();
 	void BindEnemy(ADBEnemyCharacter* Enemy);
 	void PlayerDied();

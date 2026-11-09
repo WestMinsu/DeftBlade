@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "Combat/DBWeaponData.h"
 #include "DBEnemyCharacter.generated.h"
 
 class UBehaviorTree;
@@ -21,6 +22,7 @@ public:
 	virtual float TakeDamage(
 	    float Amount, const FDamageEvent& Event, AController* EventInstigator, AActor* Causer) override;
 	bool CanAct() const;
+	virtual EDBAttackId SelectAttack(float Distance, bool bCombo);
 	UBehaviorTree* GetBehaviorTree() const
 	{
 		return BehaviorTree;

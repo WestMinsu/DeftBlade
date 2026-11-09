@@ -2,6 +2,7 @@
 
 #include "AI/DBEnemyAIController.h"
 #include "Character/DBEnemyCharacter.h"
+#include "Character/DBBossCharacter.h"
 #include "Character/DBPlayerCharacter.h"
 #include "Combat/DBHealthComponent.h"
 #include "Combat/DBCombatComponent.h"
@@ -27,7 +28,8 @@ ADBCombatEncounter::ADBCombatEncounter()
 	EntranceGate = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("EntranceGate"));
 	ExitGate = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ExitGate"));
 	ReinforcementGate = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ReinforcementGate"));
-	for (UStaticMeshComponent* Gate : {EntranceGate.Get(), ExitGate.Get(), ReinforcementGate.Get()})
+	BossGate = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BossGate"));
+	for (UStaticMeshComponent* Gate : {EntranceGate.Get(), ExitGate.Get(), ReinforcementGate.Get(), BossGate.Get()})
 	{
 		Gate->SetupAttachment(RootComponent);
 		Gate->SetCollisionProfileName(TEXT("BlockAll"));
@@ -38,6 +40,10 @@ ADBCombatEncounter::ADBCombatEncounter()
 void ADBCombatEncounter::BeginPlay()
 {
 	Super::BeginPlay();
+	if (IsValid(Boss))
+	{
+		Boss->FindComponentByClass<UDBHealthComponent>()->OnDeath.AddUObject(this, &ThisClass::BossDefeated);
+	}
 	GateClosedLocation = ReinforcementGate->GetRelativeLocation();
 	if (IsValid(FinishArea))
 	{
@@ -104,6 +110,26 @@ void ADBCombatEncounter::FinishEntered(AActor*, AActor* OtherActor)
 	{
 		return;
 	}
+	Player->FindComponentByClass<UDBCombatComponent>()->ResetCombat();
+	Player->StopJumping();
+	Player->GetCharacterMovement()->StopMovementImmediately();
+	if (IsValid(Boss) && !Boss->FindComponentByClass<UDBHealthComponent>()->IsDead())
+	{
+		SetState(EDBEncounterState::BossActive);
+		Boss->Activate(Player);
+		return;
+	}
+	SetState(EDBEncounterState::Completed);
+}
+
+void ADBCombatEncounter::BossDefeated()
+{
+	if (State != EDBEncounterState::BossActive || GetWorld()->bIsTearingDown || !EncounterPlayer.IsValid()
+	    || EncounterPlayer->FindComponentByClass<UDBHealthComponent>()->IsDead())
+	{
+		return;
+	}
+	auto* Player = EncounterPlayer.Get();
 	Player->FindComponentByClass<UDBCombatComponent>()->ResetCombat();
 	Player->StopJumping();
 	Player->GetCharacterMovement()->StopMovementImmediately();
@@ -219,6 +245,7 @@ void ADBCombatEncounter::UpdateGates()
 	const bool bCleared = State == EDBEncounterState::Cleared || State == EDBEncounterState::Completed;
 	SetGate(ExitGate, !bCleared);
 	SetGate(ReinforcementGate, !bCleared && (State != EDBEncounterState::Reinforcements || GateOpenStartedAt >= 0));
+	SetGate(BossGate, State == EDBEncounterState::BossActive);
 	if (IsValid(FinishArea))
 	{
 		FinishArea->SetActorEnableCollision(State == EDBEncounterState::Cleared);
@@ -227,6 +254,10 @@ void ADBCombatEncounter::UpdateGates()
 
 void ADBCombatEncounter::EndPlay(const EEndPlayReason::Type Reason)
 {
+	if (IsValid(Boss))
+	{
+		Boss->FindComponentByClass<UDBHealthComponent>()->OnDeath.RemoveAll(this);
+	}
 	EntryTrigger->OnComponentBeginOverlap.RemoveDynamic(this, &ThisClass::Entered);
 	if (IsValid(FinishArea))
 	{

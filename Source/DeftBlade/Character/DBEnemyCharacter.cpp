@@ -67,6 +67,11 @@ bool ADBEnemyCharacter::CanAct() const
 	       && GetWorld()->GetTimeSeconds() >= HitStunEndsAt && GetWorld()->GetTimeSeconds() >= LandingRecoveryEndsAt;
 }
 
+EDBAttackId ADBEnemyCharacter::SelectAttack(float, bool bCombo)
+{
+	return bCombo ? EDBAttackId::Heavy1 : EDBAttackId::Light1;
+}
+
 void ADBEnemyCharacter::OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode)
 {
 	Super::OnMovementModeChanged(PreviousMovementMode, PreviousCustomMode);
