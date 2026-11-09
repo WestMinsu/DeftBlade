@@ -1,13 +1,17 @@
 #include "Character/DBBossCharacter.h"
 
 #include "AI/DBEnemyAIController.h"
+#include "Combat/DBCombatComponent.h"
 #include "Combat/DBHealthComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/TextRenderComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 
 ADBBossCharacter::ADBBossCharacter()
 {
 	AutoPossessAI = EAutoPossessAI::Disabled;
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = false;
 	for (FName Name : {TEXT("Torso"), TEXT("Legs"), TEXT("Gauntlets"), TEXT("Boots"), TEXT("Helmet")})
 	{
 		auto* Part = CreateDefaultSubobject<USkeletalMeshComponent>(Name);
@@ -37,6 +41,38 @@ void ADBBossCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	SharePose();
+	CombatComponent->OnAttackStarted.AddUObject(this, &ThisClass::StartLeap);
+}
+
+bool ADBBossCharacter::CanAct() const
+{
+	// Keep the committed BT task alive during this authored leap, without enabling ordinary airborne attacks.
+	return Super::CanAct()
+	       || (CombatComponent->GetAttackId() == EDBAttackId::BossLeap && GetCharacterMovement()->IsFlying());
+}
+
+void ADBBossCharacter::StartLeap()
+{
+	if (CombatComponent->GetAttackId() == EDBAttackId::BossLeap)
+	{
+		// Flying lets CMC apply the montage's authored vertical root motion, including collision sweeps.
+		GetCharacterMovement()->SetMovementMode(MOVE_Flying);
+		SetActorTickEnabled(true);
+	}
+}
+
+void ADBBossCharacter::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	if (CombatComponent->GetAttackId() != EDBAttackId::BossLeap)
+	{
+		if (GetCharacterMovement()->IsFlying())
+		{
+			// Completion, parry and interruption all return to gravity. Death's disabled movement stays disabled.
+			GetCharacterMovement()->SetMovementMode(MOVE_Falling);
+		}
+		SetActorTickEnabled(false);
+	}
 }
 
 void ADBBossCharacter::Activate(APawn* Player)
@@ -61,7 +97,17 @@ float ADBBossCharacter::TakeDamage(
 
 EDBAttackId ADBBossCharacter::SelectAttack(float Distance, bool bCombo)
 {
-	EDBAttackId Next = Distance > 300.0f ? EDBAttackId::Heavy2 : bCombo ? EDBAttackId::Heavy1 : EDBAttackId::Light1;
+	EDBAttackId Next;
+	if (Distance > 330.0f)
+	{
+		Next = PreviousAttack == EDBAttackId::BossLeap ? EDBAttackId::Heavy2 : EDBAttackId::BossLeap;
+	}
+	else
+	{
+		Next = bCombo
+		           ? (PreviousAttack == EDBAttackId::BossWhirlwind ? EDBAttackId::Heavy1 : EDBAttackId::BossWhirlwind)
+		           : EDBAttackId::Light1;
+	}
 	if (Next == PreviousAttack)
 	{
 		Next = Next == EDBAttackId::Heavy1 ? EDBAttackId::Light1 : EDBAttackId::Heavy1;

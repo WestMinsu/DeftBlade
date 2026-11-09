@@ -39,7 +39,9 @@ enum class EDBAttackId : uint8
 	AirLight2,
 	AirLight3,
 	Launcher,
-	AirHeavy
+	AirHeavy,
+	BossLeap,
+	BossWhirlwind
 };
 
 /** Times are montage seconds, independent of playback rate. */

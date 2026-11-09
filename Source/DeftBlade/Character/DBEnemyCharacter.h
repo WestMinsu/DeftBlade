@@ -21,7 +21,7 @@ public:
 	ADBEnemyCharacter();
 	virtual float TakeDamage(
 	    float Amount, const FDamageEvent& Event, AController* EventInstigator, AActor* Causer) override;
-	bool CanAct() const;
+	virtual bool CanAct() const;
 	virtual EDBAttackId SelectAttack(float Distance, bool bCombo);
 	UBehaviorTree* GetBehaviorTree() const
 	{
