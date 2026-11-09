@@ -249,6 +249,8 @@ private:
 	void AttackBlendingOut(UAnimMontage* Montage, bool bInterrupted, uint64 ActionId);
 	void AttackEnded(UAnimMontage* Montage, bool bInterrupted, uint64 ActionId);
 	void StopAttackMontage();
+	void UpdateAttackProtectionFeedback();
+	void StopAttackProtectionFeedback();
 	void HitReactionBlendingOut(UAnimMontage* Montage, bool bInterrupted, uint64 ActionId);
 	void HitReactionEnded(UAnimMontage* Montage, bool bInterrupted, uint64 ActionId);
 	void StopHitReaction();
@@ -312,6 +314,10 @@ private:
 	/** Real-time presentation priority; damage and combo progression remain unchanged. */
 	double HitFeedbackSuppressedUntil = 0.0;
 	TWeakObjectPtr<UAudioComponent> LastHitSound;
+	TWeakObjectPtr<UAudioComponent> ProtectionSound;
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> PreviousWeaponOverlay;
+	bool bProtectionFeedbackActive = false;
 	bool bAttackMovementStarted = false;
 	bool bAttackLanded = false;
 };

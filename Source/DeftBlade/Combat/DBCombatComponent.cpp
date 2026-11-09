@@ -25,6 +25,7 @@
 #include "GameFramework/RootMotionSource.h"
 #include "GenericTeamAgentInterface.h"
 #include "Kismet/GameplayStatics.h"
+#include "Materials/MaterialInterface.h"
 #include "Particles/ParticleSystem.h"
 #include "Sound/SoundBase.h"
 #include "UnrealClient.h"
@@ -83,6 +84,7 @@ UDBCombatComponent::UDBCombatComponent()
 
 void UDBCombatComponent::InitializeWeapon(UStaticMeshComponent* InWeapon)
 {
+	StopAttackProtectionFeedback();
 	WeaponMesh = InWeapon;
 	if (!WeaponMesh)
 	{
@@ -920,6 +922,7 @@ void UDBCombatComponent::TryStartAttack()
 	}
 	Instance->OnMontageBlendingOutStarted.BindUObject(this, &ThisClass::AttackBlendingOut, ActiveActionId);
 	Instance->OnMontageEnded.BindUObject(this, &ThisClass::AttackEnded, ActiveActionId);
+	UpdateAttackProtectionFeedback();
 	OnAttackStarted.Broadcast();
 	if (IsAirLight(ActiveAttack.Id) || ActiveAttack.Id == EDBAttackId::AirHeavy)
 	{
@@ -997,6 +1000,7 @@ void UDBCombatComponent::AttackEnded(UAnimMontage* Montage, bool bInterrupted, u
 
 void UDBCombatComponent::StopAttackMontage()
 {
+	StopAttackProtectionFeedback();
 	StopAirMovement();
 	if (AttackMontageInstanceId == INDEX_NONE)
 	{
@@ -1206,6 +1210,7 @@ void UDBCombatComponent::BonesFinalized()
 		Anim->Montage_SetPosition(ActiveAttack.Montage, Position);
 		Anim->Montage_Pause(ActiveAttack.Montage);
 	}
+	UpdateAttackProtectionFeedback();
 	const FTransform CurrentMesh = Character->GetMesh()->GetComponentTransform();
 	const FTransform CurrentWeapon = GetTraceTransform(EDBHitTraceSource::Weapon);
 	TraceAttack(PreviousAttackPosition, Position, CurrentMesh, CurrentWeapon);
@@ -1368,6 +1373,52 @@ bool UDBCombatComponent::TryParry(UDBCombatComponent& Attacker, const FVector& I
 	return true;
 }
 
+void UDBCombatComponent::UpdateAttackProtectionFeedback()
+{
+	const bool bActive = WeaponData && WeaponMesh
+	                     && (WeaponData->AttackProtectionMaterial || WeaponData->AttackProtectionSound)
+	                     && HasAttackStaggerResistance();
+	if (!bActive)
+	{
+		StopAttackProtectionFeedback();
+		return;
+	}
+	if (bProtectionFeedbackActive)
+	{
+		return;
+	}
+	bProtectionFeedbackActive = true;
+	PreviousWeaponOverlay = WeaponMesh->GetOverlayMaterial();
+	if (WeaponData->AttackProtectionMaterial)
+	{
+		WeaponMesh->SetOverlayMaterial(WeaponData->AttackProtectionMaterial);
+	}
+	if (WeaponData->AttackProtectionSound)
+	{
+		ProtectionSound = UGameplayStatics::SpawnSoundAttached(WeaponData->AttackProtectionSound, WeaponMesh, NAME_None,
+		    FVector::ZeroVector, EAttachLocation::KeepRelativeOffset, true);
+	}
+}
+
+void UDBCombatComponent::StopAttackProtectionFeedback()
+{
+	if (!bProtectionFeedbackActive)
+	{
+		return;
+	}
+	bProtectionFeedbackActive = false;
+	if (WeaponMesh)
+	{
+		WeaponMesh->SetOverlayMaterial(PreviousWeaponOverlay);
+	}
+	PreviousWeaponOverlay = nullptr;
+	if (ProtectionSound.IsValid())
+	{
+		ProtectionSound->Stop();
+	}
+	ProtectionSound.Reset();
+}
+
 void UDBCombatComponent::StopParryHitStop()
 {
 	if (ParryHitStopEndsAt != 0.0)
@@ -1439,12 +1490,29 @@ void UDBCombatComponent::SweepAttack(
 			// Damage callbacks can finish/switch this action; retain the contact's authored feedback.
 			UParticleSystem* HitEffect = ActiveAttack.HitEffect;
 			USoundBase* HitSound = ActiveAttack.HitSound;
-			const float HitEffectScale = ActiveAttack.HitEffectScale;
+			float HitEffectScale = ActiveAttack.HitEffectScale;
+			const UDBWeaponData* VictimWeapon = VictimCombat ? VictimCombat->GetWeaponData() : nullptr;
+			UParticleSystem* ProtectedEffect =
+			    bResistsLaunch && VictimWeapon ? VictimWeapon->ProtectedHitEffect.Get() : nullptr;
+			USoundBase* ProtectedSound =
+			    bResistsLaunch && VictimWeapon ? VictimWeapon->ProtectedHitSound.Get() : nullptr;
 			const float Applied = UGameplayStatics::ApplyPointDamage(Target, ActiveAttack.Damage,
 			    (To.TransformPosition(Local) - From.TransformPosition(Local)).GetSafeNormal(), Hit,
 			    CastChecked<ACharacter>(GetOwner())->GetController(), GetOwner(), nullptr);
 			if (Applied > 0.0f && FPlatformTime::Seconds() >= HitFeedbackSuppressedUntil)
 			{
+				if (!Health->IsDead())
+				{
+					if (ProtectedEffect)
+					{
+						HitEffect = ProtectedEffect;
+						HitEffectScale = 1.0f;
+					}
+					if (ProtectedSound)
+					{
+						HitSound = ProtectedSound;
+					}
+				}
 				if (HitEffect)
 				{
 					UGameplayStatics::SpawnEmitterAtLocation(

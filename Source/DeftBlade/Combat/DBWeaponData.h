@@ -8,6 +8,7 @@ class UAnimInstance;
 class UAnimMontage;
 class UAnimSequence;
 class UBlendSpace;
+class UMaterialInterface;
 class UParticleSystem;
 class USoundBase;
 class UStaticMesh;
@@ -167,6 +168,20 @@ public:
 	/** Radius of weapon-segment or hand sphere sweeps, in cm. */
 	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ClampMin = "0.5"))
 	float BladeTraceRadius = 3.0f;
+
+	/** Optional presentation for the existing attack protection window; does not grant protection. */
+	UPROPERTY(EditAnywhere, Category = "Protection Feedback")
+	TObjectPtr<UMaterialInterface> AttackProtectionMaterial;
+
+	UPROPERTY(EditAnywhere, Category = "Protection Feedback")
+	TObjectPtr<USoundBase> AttackProtectionSound;
+
+	/** Replace ordinary impact feedback when this weapon's owner takes a protected, nonfatal hit. */
+	UPROPERTY(EditAnywhere, Category = "Protection Feedback")
+	TObjectPtr<UParticleSystem> ProtectedHitEffect;
+
+	UPROPERTY(EditAnywhere, Category = "Protection Feedback")
+	TObjectPtr<USoundBase> ProtectedHitSound;
 
 	UPROPERTY(EditAnywhere, Category = "Combat")
 	TArray<FDBAttackDefinition> Attacks;
