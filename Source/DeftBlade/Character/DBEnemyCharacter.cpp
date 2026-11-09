@@ -64,7 +64,7 @@ void ADBEnemyCharacter::BeginPlay()
 bool ADBEnemyCharacter::CanAct() const
 {
 	return !HealthComponent->IsDead() && ReactionInstanceId == INDEX_NONE && GetCharacterMovement()->IsMovingOnGround()
-	       && GetWorld()->GetTimeSeconds() >= LandingRecoveryEndsAt;
+	       && GetWorld()->GetTimeSeconds() >= HitStunEndsAt && GetWorld()->GetTimeSeconds() >= LandingRecoveryEndsAt;
 }
 
 void ADBEnemyCharacter::OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode)
@@ -124,7 +124,7 @@ float ADBEnemyCharacter::TakeDamage(
 	}
 	if (auto* AI = Cast<ADBEnemyAIController>(GetController()))
 	{
-		// Every accepted hit reveals its source, even when flinch is resisted.
+		// Every accepted hit reveals its source, including hits absorbed by attack protection.
 		AI->RememberAttacker(EventInstigator ? EventInstigator->GetPawn() : Causer);
 	}
 	if (CombatComponent->HasAttackStaggerResistance())
@@ -138,11 +138,18 @@ float ADBEnemyCharacter::TakeDamage(
 		bRecoverAfterLanding = true;
 	}
 	const bool bForceReaction = Attack == EDBAttackId::Launcher || Attack == EDBAttackId::AirHeavy;
-	if (!bForceReaction && GetCharacterMovement()->IsMovingOnGround()
-	    && (ReactionInstanceId != INDEX_NONE || GetWorld()->GetTimeSeconds() < NextHitReactionAt
-	        || GetWorld()->GetTimeSeconds() < LandingRecoveryEndsAt))
+	if (!bForceReaction && GetCharacterMovement()->IsMovingOnGround())
 	{
-		return Applied;
+		if (GetWorld()->GetTimeSeconds() < LandingRecoveryEndsAt)
+		{
+			return Applied;
+		}
+		if (ReactionInstanceId != INDEX_NONE)
+		{
+			// Refresh gameplay stun without rewinding a flinch or a successful parry's recoil.
+			HitStunEndsAt = GetWorld()->GetTimeSeconds() + GroundHitStunDuration;
+			return Applied;
+		}
 	}
 	PlayHitReaction(GetCharacterMovement()->IsFalling() ? AirHitReactionMontage : HitReactionMontage);
 	return Applied;
@@ -168,11 +175,15 @@ void ADBEnemyCharacter::PlayHitReaction(UAnimMontage* Montage)
 	GetCharacterMovement()->StopMovementImmediately();
 	GetCharacterMovement()->Velocity.Z = FallingSpeed;
 	StopReaction();
+	if (GetCharacterMovement()->IsMovingOnGround())
+	{
+		HitStunEndsAt = GetWorld()->GetTimeSeconds() + GroundHitStunDuration;
+	}
 	if (UAnimInstance* Anim = GetMesh()->GetAnimInstance();
 	    Anim && Montage && (GetCharacterMovement()->IsMovingOnGround() || GetCharacterMovement()->IsFalling())
 	    && Anim->Montage_Play(Montage) > 0)
 	{
-		// Air flinches are pose feedback; only ground hit reactions own this action lock/cooldown.
+		// Keep the authored pose speed. Ground stun may outlast its visual recovery.
 		if (GetCharacterMovement()->IsMovingOnGround())
 		{
 			auto* Instance = Anim->GetActiveInstanceForMontage(Montage);
@@ -204,6 +215,7 @@ void ADBEnemyCharacter::StopReaction()
 		}
 	}
 	ReactionInstanceId = INDEX_NONE;
+	HitStunEndsAt = 0.0;
 }
 
 void ADBEnemyCharacter::ReactionEnded(UAnimMontage*, bool, int32 InstanceId)
@@ -213,7 +225,6 @@ void ADBEnemyCharacter::ReactionEnded(UAnimMontage*, bool, int32 InstanceId)
 		return;
 	}
 	ReactionInstanceId = INDEX_NONE;
-	NextHitReactionAt = GetWorld()->GetTimeSeconds() + HitReactionCooldown;
 	if (auto* AI = Cast<ADBEnemyAIController>(GetController()))
 	{
 		AI->RefreshCombatState();

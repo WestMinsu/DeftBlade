@@ -70,9 +70,9 @@ protected:
 	TObjectPtr<UAnimMontage> AirHitReactionMontage;
 	UPROPERTY(EditDefaultsOnly, Category = "Animation")
 	TObjectPtr<UAnimMontage> LandingRecoveryMontage;
-	/** Recovery grants a short interval where ordinary hits deal damage without another flinch. */
+	/** Minimum game seconds without AI actions after a grounded hit; each accepted hit refreshes it. */
 	UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0"))
-	float HitReactionCooldown = 1.5f;
+	float GroundHitStunDuration = 0.75f;
 	/** Game seconds without AI actions after landing from a combat launch or an airborne hit. */
 	UPROPERTY(EditDefaultsOnly, Category = "Combat", meta = (ClampMin = "0"))
 	float LandingRecoveryDuration = 0.5f;
@@ -85,7 +85,7 @@ private:
 	void StopReaction();
 	void ReactionEnded(UAnimMontage* Montage, bool bInterrupted, int32 InstanceId);
 	int32 ReactionInstanceId = INDEX_NONE;
-	double NextHitReactionAt = 0.0;
+	double HitStunEndsAt = 0.0;
 	double LandingRecoveryEndsAt = 0.0;
 	bool bRecoverAfterLanding = false;
 };
