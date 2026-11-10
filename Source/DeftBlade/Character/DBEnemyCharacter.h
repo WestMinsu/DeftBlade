@@ -22,6 +22,8 @@ public:
 	virtual float TakeDamage(
 	    float Amount, const FDamageEvent& Event, AController* EventInstigator, AActor* Causer) override;
 	virtual bool CanAct() const;
+	virtual bool HasStaggerResistance() const;
+	virtual bool CanBeLaunched() const;
 	virtual EDBAttackId SelectAttack(float Distance, bool bCombo);
 	UBehaviorTree* GetBehaviorTree() const
 	{

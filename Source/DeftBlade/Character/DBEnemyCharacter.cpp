@@ -72,6 +72,16 @@ EDBAttackId ADBEnemyCharacter::SelectAttack(float, bool bCombo)
 	return bCombo ? EDBAttackId::Heavy1 : EDBAttackId::Light1;
 }
 
+bool ADBEnemyCharacter::HasStaggerResistance() const
+{
+	return CombatComponent->HasAttackStaggerResistance();
+}
+
+bool ADBEnemyCharacter::CanBeLaunched() const
+{
+	return !HealthComponent->IsDead();
+}
+
 void ADBEnemyCharacter::OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode)
 {
 	Super::OnMovementModeChanged(PreviousMovementMode, PreviousCustomMode);
@@ -132,7 +142,7 @@ float ADBEnemyCharacter::TakeDamage(
 		// Every accepted hit reveals its source, including hits absorbed by attack protection.
 		AI->RememberAttacker(EventInstigator ? EventInstigator->GetPawn() : Causer);
 	}
-	if (CombatComponent->HasAttackStaggerResistance())
+	if (HasStaggerResistance())
 	{
 		return Applied;
 	}

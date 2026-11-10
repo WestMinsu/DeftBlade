@@ -5,6 +5,7 @@
 #include "Animation/AnimationPoseData.h"
 #include "Animation/AttributesRuntime.h"
 #include "BonePose.h"
+#include "Character/DBEnemyCharacter.h"
 #include "Combat/DBCollisionChannels.h"
 #include "Combat/DBHealthComponent.h"
 #include "Combat/DBTargetingComponent.h"
@@ -1508,7 +1509,11 @@ void UDBCombatComponent::SweepAttack(
 			{
 				return;
 			}
-			const bool bResistsLaunch = VictimCombat && VictimCombat->HasAttackStaggerResistance();
+			const auto* Enemy = Cast<ADBEnemyCharacter>(Target);
+			const bool bResistsStagger =
+			    Enemy ? Enemy->HasStaggerResistance() : VictimCombat && VictimCombat->HasAttackStaggerResistance();
+			// Snapshot before damage callbacks: an accepted boss launcher consumes its one opening.
+			const bool bCanLaunch = !Enemy || Enemy->CanBeLaunched();
 			const EDBAttackId Attack = ActiveAttack.Id;
 			// Damage callbacks can finish/switch this action; retain the contact's authored feedback.
 			UParticleSystem* HitEffect = ActiveAttack.HitEffect;
@@ -1516,9 +1521,9 @@ void UDBCombatComponent::SweepAttack(
 			float HitEffectScale = ActiveAttack.HitEffectScale;
 			const UDBWeaponData* VictimWeapon = VictimCombat ? VictimCombat->GetWeaponData() : nullptr;
 			UParticleSystem* ProtectedEffect =
-			    bResistsLaunch && VictimWeapon ? VictimWeapon->ProtectedHitEffect.Get() : nullptr;
+			    bResistsStagger && VictimWeapon ? VictimWeapon->ProtectedHitEffect.Get() : nullptr;
 			USoundBase* ProtectedSound =
-			    bResistsLaunch && VictimWeapon ? VictimWeapon->ProtectedHitSound.Get() : nullptr;
+			    bResistsStagger && VictimWeapon ? VictimWeapon->ProtectedHitSound.Get() : nullptr;
 			const float Applied = UGameplayStatics::ApplyPointDamage(Target, ActiveAttack.Damage,
 			    (To.TransformPosition(Local) - From.TransformPosition(Local)).GetSafeNormal(), Hit,
 			    CastChecked<ACharacter>(GetOwner())->GetController(), GetOwner(), nullptr);
@@ -1547,13 +1552,17 @@ void UDBCombatComponent::SweepAttack(
 				}
 			}
 			ACharacter* Victim = Cast<ACharacter>(Target);
-			if (Applied > 0.0f && IsValid(Victim) && !Health->IsDead() && ActiveActionId == ActionId && !bResistsLaunch)
+			if (Applied > 0.0f && IsValid(Victim) && !Health->IsDead() && ActiveActionId == ActionId
+			    && !bResistsStagger)
 			{
 				if (Attack == EDBAttackId::Launcher)
 				{
-					// Start both arcs at contact instead of lifting the blade away before it hits.
-					StartLauncherMovement();
-					Victim->LaunchCharacter(FVector(0, 0, LauncherUpwardSpeed), true, true);
+					if (bCanLaunch)
+					{
+						// Start both arcs at contact instead of lifting the blade away before it hits.
+						StartLauncherMovement();
+						Victim->LaunchCharacter(FVector(0, 0, LauncherUpwardSpeed), true, true);
+					}
 				}
 				else if (Victim->GetCharacterMovement()->IsFalling())
 				{

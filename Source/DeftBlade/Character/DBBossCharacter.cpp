@@ -1,6 +1,7 @@
 #include "Character/DBBossCharacter.h"
 
 #include "AI/DBEnemyAIController.h"
+#include "BehaviorTree/BlackboardComponent.h"
 #include "Combat/DBCombatComponent.h"
 #include "Combat/DBHealthComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -41,7 +42,8 @@ void ADBBossCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	SharePose();
-	CombatComponent->OnAttackStarted.AddUObject(this, &ThisClass::StartLeap);
+	CombatComponent->OnAttackStarted.AddUObject(this, &ThisClass::HandleAttackStarted);
+	CombatComponent->OnParried.AddUObject(this, &ThisClass::OpenParryOpening);
 }
 
 bool ADBBossCharacter::CanAct() const
@@ -51,8 +53,36 @@ bool ADBBossCharacter::CanAct() const
 	       || (CombatComponent->GetAttackId() == EDBAttackId::BossLeap && GetCharacterMovement()->IsFlying());
 }
 
-void ADBBossCharacter::StartLeap()
+bool ADBBossCharacter::CanBeLaunched() const
 {
+	return Super::CanBeLaunched() && GetWorld()->GetTimeSeconds() < ParryOpeningEndsAt;
+}
+
+bool ADBBossCharacter::HasStaggerResistance() const
+{
+	// An earned aerial chain may finish, but it cannot grant another launch after landing.
+	const bool bFinishingAirCombo = bAirComboActive && GetCharacterMovement()->IsFalling();
+	return Super::HasStaggerResistance() || (!CanBeLaunched() && !bFinishingAirCombo);
+}
+
+void ADBBossCharacter::OpenParryOpening(AActor*)
+{
+	ParryOpeningEndsAt = GetWorld()->GetTimeSeconds() + ParryOpeningDuration;
+}
+
+void ADBBossCharacter::OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode)
+{
+	if (bAirComboActive && GetCharacterMovement()->IsMovingOnGround())
+	{
+		bAirComboActive = false;
+		ParryOpeningEndsAt = 0.0;
+	}
+	Super::OnMovementModeChanged(PreviousMovementMode, PreviousCustomMode);
+}
+
+void ADBBossCharacter::HandleAttackStarted()
+{
+	ParryOpeningEndsAt = 0.0;
 	if (CombatComponent->GetAttackId() == EDBAttackId::BossLeap)
 	{
 		// Flying lets CMC apply the montage's authored vertical root motion, including collision sweeps.
@@ -92,13 +122,35 @@ void ADBBossCharacter::Activate(APawn* Player)
 float ADBBossCharacter::TakeDamage(
     float Amount, const FDamageEvent& Event, AController* EventInstigator, AActor* Causer)
 {
-	return bActive ? Super::TakeDamage(Amount, Event, EventInstigator, Causer) : 0.0f;
+	if (!bActive)
+	{
+		return 0.0f;
+	}
+	const auto* Attacker = Causer ? Causer->FindComponentByClass<UDBCombatComponent>() : nullptr;
+	const bool bAcceptsLauncher =
+	    Attacker && Attacker->GetAttackId() == EDBAttackId::Launcher && CanBeLaunched() && !HasStaggerResistance();
+	const float Applied = Super::TakeDamage(Amount, Event, EventInstigator, Causer);
+	if (Applied > 0.0f && !HealthComponent->IsDead() && bAcceptsLauncher)
+	{
+		bAirComboActive = true;
+		ParryOpeningEndsAt = 0.0;
+	}
+	return Applied;
 }
 
 EDBAttackId ADBBossCharacter::SelectAttack(float Distance, bool bCombo)
 {
+	const auto* AI = Cast<ADBEnemyAIController>(GetController());
+	const auto* Target = AI && AI->GetBlackboardComponent()
+	                         ? Cast<ACharacter>(AI->GetBlackboardComponent()->GetValueAsObject(DBEnemyBB::Target))
+	                         : nullptr;
+	const bool bTargetAirborne = Target && Target->GetCharacterMovement()->IsFalling();
 	EDBAttackId Next;
-	if (Distance > 330.0f)
+	if (bTargetAirborne && Distance <= 280.0f)
+	{
+		Next = PreviousAttack == EDBAttackId::Light1 ? EDBAttackId::BossLeap : EDBAttackId::Light1;
+	}
+	else if (Distance > 280.0f)
 	{
 		Next = PreviousAttack == EDBAttackId::BossLeap ? EDBAttackId::Heavy2 : EDBAttackId::BossLeap;
 	}
