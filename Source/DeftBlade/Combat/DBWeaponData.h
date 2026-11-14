@@ -10,6 +10,7 @@ class UAnimSequence;
 class UBlendSpace;
 class UMaterialInterface;
 class UParticleSystem;
+class UNiagaraSystem;
 class USoundBase;
 class UStaticMesh;
 
@@ -170,6 +171,14 @@ public:
 	/** Radius of weapon-segment or hand sphere sweeps, in cm. */
 	UPROPERTY(EditAnywhere, Category = "Combat", meta = (ClampMin = "0.5"))
 	float BladeTraceRadius = 3.0f;
+
+	/** Air-heavy landing shockwave, in cm. Zero disables it; shares the swing's damage/hit set. */
+	UPROPERTY(EditAnywhere, Category = "Air Slam", meta = (ClampMin = "0", Units = "cm"))
+	float SlamRadius = 0.0f;
+
+	/** Authored at a 100 cm radius; scaled to SlamRadius at the actual landing surface. */
+	UPROPERTY(EditAnywhere, Category = "Air Slam")
+	TObjectPtr<UNiagaraSystem> SlamEffect;
 
 	/** Optional presentation for the existing attack protection window; does not grant protection. */
 	UPROPERTY(EditAnywhere, Category = "Protection Feedback")

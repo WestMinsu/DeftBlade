@@ -13,10 +13,12 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "Curves/CurveFloat.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
+#include "Engine/OverlapResult.h"
 #include "Engine/SkeletalMeshSocket.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshSocket.h"
@@ -28,6 +30,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInterface.h"
 #include "Particles/ParticleSystem.h"
+#include "NiagaraFunctionLibrary.h"
 #include "Sound/SoundBase.h"
 #include "UnrealClient.h"
 
@@ -729,17 +732,23 @@ bool UDBCombatComponent::FinishAction(uint64 ExpectedActionId, bool bInterrupted
 	return true;
 }
 
-void UDBCombatComponent::HandleLanding()
+void UDBCombatComponent::HandleLanding(const FHitResult& Hit)
 {
 	ParryWindowEndsAt = 0.0;
 	StopAirMovement();
 	ResetAirEvade();
 	bAirLightComboUsed = false;
 	GroundJumpPressedAt = -1.0;
-	if (GetAttackId() == EDBAttackId::AirHeavy)
+	if (GetAttackId() == EDBAttackId::AirHeavy && !bAttackLanded)
 	{
+		const uint64 ActionId = ActiveActionId;
 		bAttackLanded = true;
 		bAttackMovementStarted = true;
+		ApplySlamImpact(Hit);
+		if (ActiveActionId != ActionId)
+		{
+			return;
+		}
 		if (UAnimInstance* Anim = CastChecked<ACharacter>(GetOwner())->GetMesh()->GetAnimInstance())
 		{
 			Anim->Montage_SetPosition(ActiveAttack.Montage, FMath::Max(PreviousAttackPosition, 0.36f));
@@ -766,6 +775,54 @@ void UDBCombatComponent::StartAirMovement(float Duration, float UpwardSpeed)
 	// PhysFalling integrates the old and new velocities; both must start with the same ascent.
 	Movement->Velocity.Z = UpwardSpeed;
 	AirMotionId = Movement->ApplyRootMotionSource(Motion);
+}
+
+void UDBCombatComponent::ApplySlamImpact(const FHitResult& LandingHit)
+{
+	if (!WeaponData || !FMath::IsFinite(WeaponData->SlamRadius) || WeaponData->SlamRadius <= 0.0f)
+	{
+		return;
+	}
+	const uint64 ActionId = ActiveActionId;
+	const FVector Origin = LandingHit.ImpactPoint + LandingHit.ImpactNormal * 4.0f;
+	if (WeaponData->SlamEffect)
+	{
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(GetWorld(), WeaponData->SlamEffect, Origin,
+		    FRotationMatrix::MakeFromZ(LandingHit.ImpactNormal).Rotator(), FVector(WeaponData->SlamRadius / 100.0f));
+	}
+	const FVector QueryOrigin = Origin + FVector(0, 0, 60);
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(DBSlam), false, GetOwner());
+	TArray<FOverlapResult> Overlaps;
+	GetWorld()->OverlapMultiByObjectType(Overlaps, QueryOrigin, FQuat::Identity, FCollisionObjectQueryParams(ECC_Pawn),
+	    FCollisionShape::MakeSphere(WeaponData->SlamRadius), Params);
+	for (const FOverlapResult& Overlap : Overlaps)
+	{
+		if (ActiveActionId != ActionId)
+		{
+			return;
+		}
+		AActor* Target = Overlap.GetActor();
+		UPrimitiveComponent* Component = Overlap.GetComponent();
+		if (!IsValid(Target) || !IsValid(Component))
+		{
+			continue;
+		}
+		// A ground shockwave must not reach another floor or a high airborne target.
+		const ACharacter* Victim = Cast<ACharacter>(Target);
+		const FVector Feet =
+		    Target->GetActorLocation()
+		    - FVector(0, 0,
+		        Victim ? Victim->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() : Component->Bounds.BoxExtent.Z);
+		if (FMath::Abs(Feet.Z - LandingHit.ImpactPoint.Z) > 120.0f)
+		{
+			continue;
+		}
+		FVector Contact = Target->GetActorLocation();
+		Component->GetClosestPointOnCollision(QueryOrigin, Contact);
+		const FVector Direction = (Contact - QueryOrigin).GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
+		const FHitResult Hit(Target, Component, Contact, -Direction);
+		ApplyAttackHit(Hit, Direction, QueryOrigin, ActionId);
+	}
 }
 
 void UDBCombatComponent::HoldAirborne(ACharacter* Attacker)
@@ -874,7 +931,7 @@ void UDBCombatComponent::UpdateAttackMovement(float DeltaTime)
 	{
 		bAttackMovementStarted = true;
 		StopAirMovement();
-		Character->LaunchCharacter(FVector(0, 0, -1800), false, true);
+		Character->LaunchCharacter(FVector(0, 0, -SlamDownwardSpeed), false, true);
 	}
 }
 
@@ -1269,6 +1326,11 @@ void UDBCombatComponent::BonesFinalized()
 void UDBCombatComponent::TraceAttack(
     float Previous, float Current, const FTransform& CurrentMesh, const FTransform& CurrentWeapon)
 {
+	if (ActiveAttack.Id == EDBAttackId::AirHeavy && bAttackLanded)
+	{
+		// Landing owns the remaining damage; recovery must not start another blade contact.
+		return;
+	}
 	const uint64 ActionId = ActiveActionId;
 	if (ActiveAttack.Id == EDBAttackId::AirHeavy && FMath::IsNearlyEqual(Previous, Current) && IsAttackWindowOpen()
 	    && ActiveAttack.HitWindows.IsValidIndex(ActiveHitWindow))
@@ -1475,145 +1537,149 @@ void UDBCombatComponent::SweepAttack(
 		    FQuat::Identity, DBCollision::Melee, FCollisionShape::MakeSphere(WeaponData->BladeTraceRadius), Params);
 		for (const FHitResult& Hit : Hits)
 		{
-			AActor* Target = Hit.GetActor();
+			ApplyAttackHit(Hit, (To.TransformPosition(Local) - From.TransformPosition(Local)).GetSafeNormal(),
+			    GetOwner()->GetActorLocation(), ActionId);
 			if (ActiveActionId != ActionId)
 			{
 				return;
 			}
-			if (!IsValid(Target) || HitActors.Contains(Target))
+		}
+	}
+}
+
+void UDBCombatComponent::ApplyAttackHit(
+    const FHitResult& Hit, const FVector& Direction, const FVector& TraceOrigin, uint64 ActionId)
+{
+	AActor* Target = Hit.GetActor();
+	if (ActiveActionId != ActionId)
+	{
+		return;
+	}
+	if (!IsValid(Target) || HitActors.Contains(Target))
+	{
+		return;
+	}
+	const auto* Team = Cast<IGenericTeamAgentInterface>(CastChecked<ACharacter>(GetOwner())->GetController());
+	if (Team && Team->GetTeamAttitudeTowards(*Target) != ETeamAttitude::Hostile)
+	{
+		return;
+	}
+	const UDBHealthComponent* Health = Target->FindComponentByClass<UDBHealthComponent>();
+	if (!Health || Health->IsDead())
+	{
+		return;
+	}
+	FCollisionQueryParams Sight(SCENE_QUERY_STAT(DBAttackSight), false, GetOwner());
+	Sight.AddIgnoredActor(Target);
+	FHitResult Obstruction;
+	if (GetWorld()->LineTraceSingleByChannel(Obstruction, TraceOrigin, Hit.ImpactPoint, DBCollision::Melee, Sight))
+	{
+		return;
+	}
+	// One contact attempt per actor/window, even when that target rejects it via i-frames.
+	HitActors.Add(Target);
+	UDBCombatComponent* VictimCombat = Target->FindComponentByClass<UDBCombatComponent>();
+	if (VictimCombat && VictimCombat->TryParry(*this, Hit.ImpactPoint))
+	{
+		return;
+	}
+	const auto* Enemy = Cast<ADBEnemyCharacter>(Target);
+	const bool bResistsStagger =
+	    Enemy ? Enemy->HasStaggerResistance() : VictimCombat && VictimCombat->HasAttackStaggerResistance();
+	// Snapshot before damage callbacks: an accepted boss launcher consumes its one opening.
+	const bool bCanLaunch = !Enemy || Enemy->CanBeLaunched();
+	const EDBAttackId Attack = ActiveAttack.Id;
+	// Damage callbacks can finish/switch this action; retain the contact's authored feedback.
+	UParticleSystem* HitEffect = ActiveAttack.HitEffect;
+	USoundBase* HitSound = ActiveAttack.HitSound;
+	float HitEffectScale = ActiveAttack.HitEffectScale;
+	const UDBWeaponData* VictimWeapon = VictimCombat ? VictimCombat->GetWeaponData() : nullptr;
+	UParticleSystem* ProtectedEffect =
+	    bResistsStagger && VictimWeapon ? VictimWeapon->ProtectedHitEffect.Get() : nullptr;
+	USoundBase* ProtectedSound = bResistsStagger && VictimWeapon ? VictimWeapon->ProtectedHitSound.Get() : nullptr;
+	const float Applied = UGameplayStatics::ApplyPointDamage(Target, ActiveAttack.Damage, Direction, Hit,
+	    CastChecked<ACharacter>(GetOwner())->GetController(), GetOwner(), nullptr);
+	if (Applied > 0.0f && FPlatformTime::Seconds() >= HitFeedbackSuppressedUntil)
+	{
+		if (!Health->IsDead())
+		{
+			if (ProtectedEffect)
 			{
-				continue;
+				HitEffect = ProtectedEffect;
+				HitEffectScale = 1.0f;
 			}
-			const auto* Team = Cast<IGenericTeamAgentInterface>(CastChecked<ACharacter>(GetOwner())->GetController());
-			if (Team && Team->GetTeamAttitudeTowards(*Target) != ETeamAttitude::Hostile)
+			if (ProtectedSound)
 			{
-				continue;
+				HitSound = ProtectedSound;
 			}
-			const UDBHealthComponent* Health = Target->FindComponentByClass<UDBHealthComponent>();
-			if (!Health || Health->IsDead())
+		}
+		if (HitEffect)
+		{
+			UGameplayStatics::SpawnEmitterAtLocation(
+			    GetWorld(), HitEffect, Hit.ImpactPoint, Hit.ImpactNormal.Rotation(), FVector(HitEffectScale));
+		}
+		if (HitSound)
+		{
+			LastHitSound = UGameplayStatics::SpawnSoundAtLocation(this, HitSound, Hit.ImpactPoint);
+		}
+	}
+	ACharacter* Victim = Cast<ACharacter>(Target);
+	if (Applied > 0.0f && IsValid(Victim) && !Health->IsDead() && ActiveActionId == ActionId && !bResistsStagger)
+	{
+		if (Attack == EDBAttackId::Launcher)
+		{
+			if (bCanLaunch)
 			{
-				continue;
+				// Start both arcs at contact instead of lifting the blade away before it hits.
+				StartLauncherMovement();
+				Victim->LaunchCharacter(FVector(0, 0, LauncherUpwardSpeed), true, true);
 			}
-			FCollisionQueryParams Sight = Params;
-			Sight.AddIgnoredActor(Target);
-			FHitResult Obstruction;
-			if (GetWorld()->LineTraceSingleByChannel(
-			        Obstruction, GetOwner()->GetActorLocation(), Hit.ImpactPoint, DBCollision::Melee, Sight))
+		}
+		else if (Victim->GetCharacterMovement()->IsFalling())
+		{
+			if (Attack == EDBAttackId::AirHeavy)
 			{
-				continue;
+				Victim->LaunchCharacter(FVector(0, 0, -SlamDownwardSpeed), true, true);
 			}
-			// One contact attempt per actor/window, even when that target rejects it via i-frames.
-			HitActors.Add(Target);
-			UDBCombatComponent* VictimCombat = Target->FindComponentByClass<UDBCombatComponent>();
-			if (VictimCombat && VictimCombat->TryParry(*this, Hit.ImpactPoint))
+			else if (IsAirLight(Attack))
 			{
-				return;
-			}
-			const auto* Enemy = Cast<ADBEnemyCharacter>(Target);
-			const bool bResistsStagger =
-			    Enemy ? Enemy->HasStaggerResistance() : VictimCombat && VictimCombat->HasAttackStaggerResistance();
-			// Snapshot before damage callbacks: an accepted boss launcher consumes its one opening.
-			const bool bCanLaunch = !Enemy || Enemy->CanBeLaunched();
-			const EDBAttackId Attack = ActiveAttack.Id;
-			// Damage callbacks can finish/switch this action; retain the contact's authored feedback.
-			UParticleSystem* HitEffect = ActiveAttack.HitEffect;
-			USoundBase* HitSound = ActiveAttack.HitSound;
-			float HitEffectScale = ActiveAttack.HitEffectScale;
-			const UDBWeaponData* VictimWeapon = VictimCombat ? VictimCombat->GetWeaponData() : nullptr;
-			UParticleSystem* ProtectedEffect =
-			    bResistsStagger && VictimWeapon ? VictimWeapon->ProtectedHitEffect.Get() : nullptr;
-			USoundBase* ProtectedSound =
-			    bResistsStagger && VictimWeapon ? VictimWeapon->ProtectedHitSound.Get() : nullptr;
-			const float Applied = UGameplayStatics::ApplyPointDamage(Target, ActiveAttack.Damage,
-			    (To.TransformPosition(Local) - From.TransformPosition(Local)).GetSafeNormal(), Hit,
-			    CastChecked<ACharacter>(GetOwner())->GetController(), GetOwner(), nullptr);
-			if (Applied > 0.0f && FPlatformTime::Seconds() >= HitFeedbackSuppressedUntil)
-			{
-				if (!Health->IsDead())
+				if (VictimCombat)
 				{
-					if (ProtectedEffect)
-					{
-						HitEffect = ProtectedEffect;
-						HitEffectScale = 1.0f;
-					}
-					if (ProtectedSound)
-					{
-						HitSound = ProtectedSound;
-					}
+					VictimCombat->HoldAirborne(CastChecked<ACharacter>(GetOwner()));
 				}
-				if (HitEffect)
-				{
-					UGameplayStatics::SpawnEmitterAtLocation(
-					    GetWorld(), HitEffect, Hit.ImpactPoint, Hit.ImpactNormal.Rotation(), FVector(HitEffectScale));
-				}
-				if (HitSound)
-				{
-					LastHitSound = UGameplayStatics::SpawnSoundAtLocation(this, HitSound, Hit.ImpactPoint);
-				}
 			}
-			ACharacter* Victim = Cast<ACharacter>(Target);
-			if (Applied > 0.0f && IsValid(Victim) && !Health->IsDead() && ActiveActionId == ActionId
-			    && !bResistsStagger)
+		}
+		else if (ActiveAttack.GroundKnockbackDistance > 0.0f && Victim->GetCharacterMovement()->IsMovingOnGround())
+		{
+			const FVector Away = (Victim->GetActorLocation() - GetOwner()->GetActorLocation())
+			                         .GetSafeNormal2D(UE_SMALL_NUMBER, GetOwner()->GetActorForwardVector());
+			auto* Movement = Victim->GetCharacterMovement();
+			TSharedPtr<FRootMotionSource_ConstantForce> Motion = MakeShared<FRootMotionSource_ConstantForce>();
+			Motion->InstanceName = TEXT("DBGroundKnockback");
+			Motion->Priority = 100;
+			Motion->AccumulateMode = ERootMotionAccumulateMode::Override;
+			Motion->Duration = .18f;
+			Motion->Force = Away * (ActiveAttack.GroundKnockbackDistance / Motion->Duration);
+			Motion->Settings.SetFlag(ERootMotionSourceSettingsFlags::IgnoreZAccumulate);
+			Motion->Settings.UnSetFlag(ERootMotionSourceSettingsFlags::DisablePartialEndTick);
+			// End horizontal motion without slowing a fall if collision carries the victim off a ledge.
+			Motion->FinishVelocityParams.Mode = ERootMotionFinishVelocityMode::ClampVelocity;
+			Motion->FinishVelocityParams.ClampVelocity = 0.0f;
+			Movement->RemoveRootMotionSource(Motion->InstanceName);
+			Movement->ApplyRootMotionSource(Motion);
+			// Keep both attack poses, while letting the victim's source create real separation.
+			for (UDBCombatComponent* Combat : {this, VictimCombat})
 			{
-				if (Attack == EDBAttackId::Launcher)
+				if (!Combat)
 				{
-					if (bCanLaunch)
-					{
-						// Start both arcs at contact instead of lifting the blade away before it hits.
-						StartLauncherMovement();
-						Victim->LaunchCharacter(FVector(0, 0, LauncherUpwardSpeed), true, true);
-					}
+					continue;
 				}
-				else if (Victim->GetCharacterMovement()->IsFalling())
+				if (UAnimInstance* Anim = CastChecked<ACharacter>(Combat->GetOwner())->GetMesh()->GetAnimInstance())
 				{
-					if (Attack == EDBAttackId::AirHeavy)
+					if (FAnimMontageInstance* Instance = Anim->GetMontageInstanceForID(Combat->AttackMontageInstanceId);
+					    Instance && !Instance->IsRootMotionDisabled())
 					{
-						Victim->LaunchCharacter(FVector(0, 0, -1800), true, true);
-					}
-					else if (IsAirLight(Attack))
-					{
-						if (VictimCombat)
-						{
-							VictimCombat->HoldAirborne(CastChecked<ACharacter>(GetOwner()));
-						}
-					}
-				}
-				else if (ActiveAttack.GroundKnockbackDistance > 0.0f
-				         && Victim->GetCharacterMovement()->IsMovingOnGround())
-				{
-					const FVector Away = (Victim->GetActorLocation() - GetOwner()->GetActorLocation())
-					                         .GetSafeNormal2D(UE_SMALL_NUMBER, GetOwner()->GetActorForwardVector());
-					auto* Movement = Victim->GetCharacterMovement();
-					TSharedPtr<FRootMotionSource_ConstantForce> Motion = MakeShared<FRootMotionSource_ConstantForce>();
-					Motion->InstanceName = TEXT("DBGroundKnockback");
-					Motion->Priority = 100;
-					Motion->AccumulateMode = ERootMotionAccumulateMode::Override;
-					Motion->Duration = .18f;
-					Motion->Force = Away * (ActiveAttack.GroundKnockbackDistance / Motion->Duration);
-					Motion->Settings.SetFlag(ERootMotionSourceSettingsFlags::IgnoreZAccumulate);
-					Motion->Settings.UnSetFlag(ERootMotionSourceSettingsFlags::DisablePartialEndTick);
-					// End horizontal motion without slowing a fall if collision carries the victim off a ledge.
-					Motion->FinishVelocityParams.Mode = ERootMotionFinishVelocityMode::ClampVelocity;
-					Motion->FinishVelocityParams.ClampVelocity = 0.0f;
-					Movement->RemoveRootMotionSource(Motion->InstanceName);
-					Movement->ApplyRootMotionSource(Motion);
-					// Keep both attack poses, while letting the victim's source create real separation.
-					for (UDBCombatComponent* Combat : {this, VictimCombat})
-					{
-						if (!Combat)
-						{
-							continue;
-						}
-						if (UAnimInstance* Anim =
-						        CastChecked<ACharacter>(Combat->GetOwner())->GetMesh()->GetAnimInstance())
-						{
-							if (FAnimMontageInstance* Instance =
-							        Anim->GetMontageInstanceForID(Combat->AttackMontageInstanceId);
-							    Instance && !Instance->IsRootMotionDisabled())
-							{
-								Instance->PushDisableRootMotion();
-							}
-						}
+						Instance->PushDisableRootMotion();
 					}
 				}
 			}

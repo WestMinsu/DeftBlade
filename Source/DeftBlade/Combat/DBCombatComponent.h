@@ -96,7 +96,7 @@ public:
 		HeldGlideSpeed = SprintSpeed;
 	}
 	bool TryTransitionToSprint();
-	void HandleLanding();
+	void HandleLanding(const FHitResult& Hit);
 	void ResetAirEvade()
 	{
 		bAirEvadeUsed = false;
@@ -150,6 +150,9 @@ protected:
 	/** Shared upward launch speed for the attacker and the struck enemy. */
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Air", meta = (ClampMin = "0"))
 	float LauncherUpwardSpeed = 1100.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Air", meta = (ClampMin = "1", Units = "cm/s"))
+	float SlamDownwardSpeed = 2400.0f;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Weapon")
 	TObjectPtr<UDBWeaponData> WeaponData;
@@ -266,6 +269,8 @@ private:
 	    const FTransform& CurrentTrace, EDBHitTraceSource Source) const;
 	void TraceAttack(float Previous, float Current, const FTransform& CurrentMesh, const FTransform& CurrentWeapon);
 	void SweepAttack(const FTransform& From, const FTransform& To, uint64 ActionId, EDBHitTraceSource Source);
+	void ApplyAttackHit(const FHitResult& Hit, const FVector& Direction, const FVector& TraceOrigin, uint64 ActionId);
+	void ApplySlamImpact(const FHitResult& LandingHit);
 	bool CanParry() const;
 	void OpenParryWindow(const FVector& Direction);
 	bool TryParry(UDBCombatComponent& Attacker, const FVector& ImpactPoint);

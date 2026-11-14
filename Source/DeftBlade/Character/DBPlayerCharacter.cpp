@@ -174,7 +174,7 @@ void ADBPlayerCharacter::OnJumped_Implementation()
 
 void ADBPlayerCharacter::Landed(const FHitResult& Hit)
 {
-	CombatComponent->HandleLanding();
+	CombatComponent->HandleLanding(Hit);
 	Super::Landed(Hit);
 	StopJumpMontages();
 }

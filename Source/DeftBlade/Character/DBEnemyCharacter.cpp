@@ -98,7 +98,7 @@ void ADBEnemyCharacter::OnMovementModeChanged(EMovementMode PreviousMovementMode
 	}
 	else if (GetCharacterMovement()->IsMovingOnGround())
 	{
-		CombatComponent->HandleLanding();
+		CombatComponent->HandleLanding(GetCharacterMovement()->CurrentFloor.HitResult);
 		if (PreviousMovementMode == MOVE_Falling)
 		{
 			StopReaction();
