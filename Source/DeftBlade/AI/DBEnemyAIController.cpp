@@ -12,6 +12,7 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "EngineUtils.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "Navigation/PathFollowingComponent.h"
 #include "NavigationSystem.h"
@@ -81,10 +82,28 @@ void ADBEnemyAIController::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 	auto* Enemy = Cast<ADBEnemyCharacter>(GetPawn());
 	const auto* Combat = Enemy ? Enemy->FindComponentByClass<UDBCombatComponent>() : nullptr;
+	const bool bCanFaceTarget = TrackedTarget.IsValid() && Blackboard && Enemy && Enemy->CanAct() && Combat
+	                            && Combat->GetActionState() == EDBActionState::None;
+	bool bBackingAway = false;
+	if (bCanFaceTarget && bHasSight && !Blackboard->GetValueAsBool(DBEnemyBB::CanAttack))
+	{
+		const FVector TowardsTarget = (LastSeenLocation - Enemy->GetActorLocation()).GetSafeNormal2D();
+		const FVector GoalDirection =
+		    (Blackboard->GetValueAsVector(DBEnemyBB::CombatLocation) - Enemy->GetActorLocation()).GetSafeNormal2D();
+		// Keep facing through the final braking frames, after MoveTo has reached its goal.
+		bBackingAway = (GetMoveStatus() == EPathFollowingStatus::Moving
+		                   && FVector::DotProduct(GoalDirection, TowardsTarget) < -.1f)
+		               || (Enemy->GetVelocity().SizeSquared2D() > 100.
+		                   && FVector::DotProduct(Enemy->GetVelocity().GetSafeNormal2D(), TowardsTarget) < -.1f);
+	}
+	if (Enemy)
+	{
+		Enemy->GetCharacterMovement()->bOrientRotationToMovement = !bBackingAway;
+	}
 	// The attack task owns aiming once its Blackboard branch is eligible.
-	if (TrackedTarget.IsValid() && Blackboard && !Blackboard->GetValueAsBool(DBEnemyBB::CanAttack) && Enemy
-	    && Enemy->CanAct() && Combat && Combat->GetActionState() == EDBActionState::None
-	    && GetMoveStatus() == EPathFollowingStatus::Idle && Enemy->GetVelocity().SizeSquared2D() < 100.)
+	if (bCanFaceTarget && !Blackboard->GetValueAsBool(DBEnemyBB::CanAttack)
+	    && (bBackingAway
+	        || (GetMoveStatus() == EPathFollowingStatus::Idle && Enemy->GetVelocity().SizeSquared2D() < 100.)))
 	{
 		const FRotator Facing(0, (LastSeenLocation - Enemy->GetActorLocation()).Rotation().Yaw, 0);
 		Enemy->SetActorRotation(FMath::RInterpConstantTo(Enemy->GetActorRotation(), Facing, DeltaSeconds, 180.f));
@@ -433,6 +452,10 @@ void ADBEnemyAIController::AttackFinished()
 void ADBEnemyAIController::StopBehavior()
 {
 	StopMovement();
+	if (auto* Enemy = Cast<ADBEnemyCharacter>(GetPawn()))
+	{
+		Enemy->GetCharacterMovement()->bOrientRotationToMovement = true;
+	}
 	ForgetTarget();
 	if (Blackboard)
 	{
