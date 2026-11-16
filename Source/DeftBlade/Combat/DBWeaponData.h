@@ -154,6 +154,26 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Weapon")
 	FTransform RelativeTransform = FTransform::Identity;
 
+	/** None keeps the existing always-in-hand behavior (including enemy profiles). */
+	UPROPERTY(EditAnywhere, Category = "Weapon|Presentation")
+	FName HolsterSocket;
+
+	UPROPERTY(EditAnywhere, Category = "Weapon|Presentation")
+	FTransform HolsterTransform = FTransform::Identity;
+
+	/** Independent upper-body group; drawing overlaps the attack's existing startup. */
+	UPROPERTY(EditAnywhere, Category = "Weapon|Presentation")
+	TObjectPtr<UAnimMontage> DrawMontage;
+
+	UPROPERTY(EditAnywhere, Category = "Weapon|Presentation")
+	TObjectPtr<UAnimMontage> HolsterMontage;
+
+	UPROPERTY(EditAnywhere, Category = "Weapon|Presentation")
+	TObjectPtr<UAnimSequence> HolsteredIdleAnimation;
+
+	UPROPERTY(EditAnywhere, Category = "Weapon|Presentation")
+	TObjectPtr<UBlendSpace> HolsteredLocomotionBlendSpace;
+
 	/** Existing locomotion/slot AnimBP preset; not changed during an action. */
 	UPROPERTY(EditAnywhere, Category = "Animation")
 	TSubclassOf<UAnimInstance> AnimationClass;

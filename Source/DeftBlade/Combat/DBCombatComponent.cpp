@@ -100,12 +100,115 @@ void UDBCombatComponent::InitializeWeapon(UStaticMeshComponent* InWeapon)
 		return;
 	}
 	USkeletalMeshComponent* Mesh = CastChecked<ACharacter>(GetOwner())->GetMesh();
-	WeaponMesh->AttachToComponent(
-	    Mesh, FAttachmentTransformRules::SnapToTargetNotIncludingScale, WeaponData->AttachSocket);
-	WeaponMesh->SetRelativeTransform(WeaponData->RelativeTransform);
+	AttachWeapon(bWeaponDrawn);
 	if (WeaponData->AnimationClass && Mesh->GetAnimClass() != WeaponData->AnimationClass)
 	{
 		Mesh->SetAnimInstanceClass(WeaponData->AnimationClass);
+	}
+}
+
+bool UDBCombatComponent::CanHolsterWeapon() const
+{
+	const ACharacter* Character = CastChecked<ACharacter>(GetOwner());
+	return WeaponData && WeaponData->Mesh && !WeaponData->HolsterSocket.IsNone()
+	       && Character->GetMesh()->DoesSocketExist(WeaponData->HolsterSocket);
+}
+
+void UDBCombatComponent::AttachWeapon(bool bDrawn)
+{
+	if (!WeaponMesh || !WeaponData)
+	{
+		return;
+	}
+	bWeaponDrawn = bDrawn || !CanHolsterWeapon();
+	WeaponMesh->AttachToComponent(CastChecked<ACharacter>(GetOwner())->GetMesh(),
+	    FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+	    bWeaponDrawn ? WeaponData->AttachSocket : WeaponData->HolsterSocket);
+	WeaponMesh->SetRelativeTransform(bWeaponDrawn ? WeaponData->RelativeTransform : WeaponData->HolsterTransform);
+	// Never sweep the jump between the back and hand as a weapon strike.
+	PreviousWeaponTransform = GetTraceTransform(EDBHitTraceSource::Weapon);
+}
+
+bool UDBCombatComponent::PlayWeaponPresentation(bool bDrawn, float MaxDuration)
+{
+	StopWeaponPresentation();
+	UAnimMontage* Montage = bDrawn ? WeaponData->DrawMontage : WeaponData->HolsterMontage;
+	UAnimInstance* Anim = CastChecked<ACharacter>(GetOwner())->GetMesh()->GetAnimInstance();
+	if (!Montage || !Anim || Montage->HasRootMotion())
+	{
+		return false;
+	}
+	const float Rate = MaxDuration > 0.0f ? FMath::Max(1.0f, Montage->GetPlayLength() / MaxDuration) : 1.0f;
+	if (Anim->Montage_Play(Montage, Rate, EMontagePlayReturnType::MontageLength, 0.0f, false) <= 0.0f)
+	{
+		return false;
+	}
+	FAnimMontageInstance* Instance = Anim->GetActiveInstanceForMontage(Montage);
+	check(Instance);
+	bDrawingWeapon = bDrawn;
+	WeaponPresentationInstanceId = Instance->GetInstanceID();
+	Instance->OnMontageEnded.BindUObject(this, &ThisClass::WeaponPresentationEnded, WeaponPresentationInstanceId);
+	return true;
+}
+
+void UDBCombatComponent::StopWeaponPresentation()
+{
+	UAnimInstance* Anim = CastChecked<ACharacter>(GetOwner())->GetMesh()->GetAnimInstance();
+	FAnimMontageInstance* Instance = Anim ? Anim->GetMontageInstanceForID(WeaponPresentationInstanceId) : nullptr;
+	WeaponPresentationInstanceId = INDEX_NONE;
+	if (Instance)
+	{
+		Instance->OnMontageEnded.Unbind();
+		Instance->Stop(FAlphaBlend(0.06f), true);
+	}
+}
+
+void UDBCombatComponent::CommitWeaponAttachment(int32 MontageInstanceId, bool bDrawn)
+{
+	if (MontageInstanceId == WeaponPresentationInstanceId && bDrawn == bDrawingWeapon && CanProcessInput())
+	{
+		AttachWeapon(bDrawn);
+	}
+}
+
+void UDBCombatComponent::WeaponPresentationEnded(UAnimMontage*, bool bInterrupted, int32 InstanceId)
+{
+	if (InstanceId != WeaponPresentationInstanceId)
+	{
+		return;
+	}
+	WeaponPresentationInstanceId = INDEX_NONE;
+	if (!bInterrupted && CanProcessInput())
+	{
+		AttachWeapon(bDrawingWeapon);
+	}
+}
+
+void UDBCombatComponent::UpdateWeaponPresentation()
+{
+	if (!CanHolsterWeapon())
+	{
+		return;
+	}
+	const ACharacter* Character = CastChecked<ACharacter>(GetOwner());
+	const bool bGrounded = Character->GetCharacterMovement()->IsMovingOnGround();
+	UAnimInstance* Anim = Character->GetMesh()->GetAnimInstance();
+	if (!bGrounded && WeaponPresentationInstanceId != INDEX_NONE && !bDrawingWeapon)
+	{
+		StopWeaponPresentation();
+	}
+	const double Now = GetWorld()->GetTimeSeconds();
+	if (ActionState != EDBActionState::None || BufferedAction.Id != 0)
+	{
+		HolsterAfter = Now + AutoHolsterDelay;
+	}
+	else if (bWeaponDrawn && bGrounded && Anim && WeaponPresentationInstanceId == INDEX_NONE
+	         && !Anim->IsAnyMontagePlaying() && Now >= HolsterAfter)
+	{
+		if (!PlayWeaponPresentation(false))
+		{
+			AttachWeapon(false);
+		}
 	}
 }
 
@@ -129,14 +232,24 @@ bool UDBCombatComponent::TryEquipWeapon(UDBWeaponData* NewWeapon)
 		QueueInput(EDBActionInput::SwitchWeapon, FVector::ZeroVector, NewWeapon);
 		return NextRequestId != PreviousRequest;
 	}
-	if (ActionState != EDBActionState::None || BufferedAction.Id != 0 || EvadeMotionId != 0 || !Anim
-	    || Anim->IsAnyMontagePlaying())
+	const bool bOtherMontage = Anim
+	                           && Anim->MontageInstances.ContainsByPredicate(
+	                               [this](const FAnimMontageInstance* Instance)
+	                               {
+		                               return Instance
+		                                      && (!WeaponData
+		                                          || (Instance->Montage != WeaponData->DrawMontage
+		                                              && Instance->Montage != WeaponData->HolsterMontage));
+	                               });
+	if (ActionState != EDBActionState::None || BufferedAction.Id != 0 || EvadeMotionId != 0 || !Anim || bOtherMontage)
 	{
 		return false;
 	}
+	StopWeaponPresentation();
 	WeaponData = NewWeapon;
 	ParryWindowEndsAt = 0.0;
 	InitializeWeapon(WeaponMesh);
+	HolsterAfter = GetWorld()->GetTimeSeconds() + AutoHolsterDelay;
 	return true;
 }
 
@@ -383,6 +496,7 @@ void UDBCombatComponent::TryStartJump()
 		return;
 	}
 	// Stop the ground evade before CMC enters Falling, preserving the separate air-evade budget.
+	StopWeaponPresentation();
 	StopEvadeMovement(false);
 	FinishAction(ActiveActionId);
 	StopAirMovement();
@@ -550,6 +664,7 @@ void UDBCombatComponent::TickComponent(
 		// Keep the backward facing until its pose exits. Forward input is handled by the handoff above.
 		CastChecked<ACharacter>(GetOwner())->ConsumeMovementInputVector();
 	}
+	UpdateWeaponPresentation();
 }
 
 void UDBCombatComponent::UpdateEvadeMovement(float DeltaTime)
@@ -1005,6 +1120,16 @@ void UDBCombatComponent::TryStartAttack()
 	Instance->OnMontageEnded.BindUObject(this, &ThisClass::AttackEnded, ActiveActionId);
 	UpdateAttackProtectionFeedback();
 	OnAttackStarted.Broadcast();
+	HolsterAfter = GetWorld()->GetTimeSeconds() + AutoHolsterDelay;
+	if (!bWeaponDrawn)
+	{
+		const float DrawTime = ActiveAttack.HitWindows[0].Start / ActiveAttack.PlayRate - 0.03f;
+		if (!Character->GetCharacterMovement()->IsMovingOnGround() || DrawTime < 0.06f
+		    || !PlayWeaponPresentation(true, DrawTime))
+		{
+			AttachWeapon(true);
+		}
+	}
 	if (IsAirLight(ActiveAttack.Id) || ActiveAttack.Id == EDBAttackId::AirHeavy)
 	{
 		StartAirMovement(ActiveAttack.Montage->GetPlayLength() / ActiveAttack.PlayRate, RiseSpeed);
@@ -1081,6 +1206,7 @@ void UDBCombatComponent::AttackEnded(UAnimMontage* Montage, bool bInterrupted, u
 
 void UDBCombatComponent::StopAttackMontage()
 {
+	StopWeaponPresentation();
 	StopAttackProtectionFeedback();
 	StopAirMovement();
 	if (AttackMontageInstanceId == INDEX_NONE)
@@ -1284,6 +1410,12 @@ void UDBCombatComponent::BonesFinalized()
 	}
 	const uint64 ActionId = ActiveActionId;
 	float Position = bAttackEndedPending ? ActiveAttack.Montage->GetPlayLength() : Instance->GetPosition();
+	if (!bWeaponDrawn && Position >= ActiveAttack.HitWindows[0].Start)
+	{
+		// A missing/late notify or a long frame cannot leave a live attack tracing from the back.
+		StopWeaponPresentation();
+		AttachWeapon(true);
+	}
 	if (ActiveAttack.Id == EDBAttackId::AirHeavy && !bAttackLanded && Position >= 0.32f)
 	{
 		// Hold the falling pose; recovery resumes from HandleLanding, never by forcing Walking.
@@ -1426,6 +1558,9 @@ bool UDBCombatComponent::TryParry(UDBCombatComponent& Attacker, const FVector& I
 	}
 	ParryWindowEndsAt = 0.0;
 	GetOwner()->SetActorRotation(ParryDirection.Rotation());
+	StopWeaponPresentation();
+	AttachWeapon(true);
+	HolsterAfter = GetWorld()->GetTimeSeconds() + AutoHolsterDelay;
 	// The same light swing may damage the enemy just after the clash. Give the parry a clear beat.
 	HitFeedbackSuppressedUntil = FPlatformTime::Seconds() + 0.14;
 	if (LastHitSound.IsValid())
@@ -1731,6 +1866,8 @@ void UDBCombatComponent::StopEvadeMontage()
 
 void UDBCombatComponent::ResetCombat()
 {
+	StopWeaponPresentation();
+	HolsterAfter = GetWorld()->GetTimeSeconds() + AutoHolsterDelay;
 	ParryWindowEndsAt = 0.0;
 	LastLightInputAt = -1.0;
 	StopParryHitStop();

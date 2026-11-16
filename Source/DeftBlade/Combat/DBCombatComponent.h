@@ -84,6 +84,12 @@ public:
 	void ReactToHit(UAnimMontage* Montage);
 	bool CanJumpFromAction() const;
 	void InitializeWeapon(UStaticMeshComponent* InWeapon);
+	bool IsWeaponDrawn() const
+	{
+		return bWeaponDrawn;
+	}
+	/** Only the current presentation montage's branching point may move the weapon. */
+	void CommitWeaponAttachment(int32 MontageInstanceId, bool bDrawn);
 	/** Idle equips immediately; authored ground-attack links buffer one switch until ComboStart. */
 	bool TryEquipWeapon(UDBWeaponData* NewWeapon);
 	const UDBWeaponData* GetWeaponData() const
@@ -156,6 +162,9 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Combat|Weapon")
 	TObjectPtr<UDBWeaponData> WeaponData;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Combat|Weapon", meta = (ClampMin = "0"))
+	float AutoHolsterDelay = 2.5f;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Combat|Parry")
 	TObjectPtr<UParticleSystem> ParryEffect;
@@ -238,6 +247,12 @@ protected:
 	FDBBufferedAction BufferedAction;
 
 private:
+	bool CanHolsterWeapon() const;
+	void AttachWeapon(bool bDrawn);
+	bool PlayWeaponPresentation(bool bDrawn, float MaxDuration = 0.0f);
+	void StopWeaponPresentation();
+	void WeaponPresentationEnded(UAnimMontage* Montage, bool bInterrupted, int32 InstanceId);
+	void UpdateWeaponPresentation();
 	bool CanProcessInput() const;
 	void QueueInput(
 	    EDBActionInput Input, const FVector& Direction = FVector::ZeroVector, UDBWeaponData* NewWeapon = nullptr);
@@ -305,6 +320,11 @@ private:
 	float PreviousAttackPosition = 0.0f;
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMeshComponent> WeaponMesh;
+	UPROPERTY(VisibleInstanceOnly, Transient, Category = "Combat|Weapon")
+	bool bWeaponDrawn = false;
+	int32 WeaponPresentationInstanceId = INDEX_NONE;
+	bool bDrawingWeapon = false;
+	double HolsterAfter = 0.0;
 	FDelegateHandle PoseFinalizedHandle;
 	FTransform PreviousMeshTransform;
 	FTransform PreviousWeaponTransform;

@@ -17,10 +17,13 @@ void UDBAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 	const UDBCombatComponent* Combat = Pawn ? Pawn->FindComponentByClass<UDBCombatComponent>() : nullptr;
 	if (const UDBWeaponData* Weapon = Combat ? Combat->GetWeaponData() : nullptr)
 	{
-		LocomotionIdle = Weapon->IdleAnimation;
-		LocomotionBlendSpace = Weapon->LocomotionBlendSpace;
+		const bool bDrawn = Combat->IsWeaponDrawn();
+		LocomotionIdle =
+		    !bDrawn && Weapon->HolsteredIdleAnimation ? Weapon->HolsteredIdleAnimation : Weapon->IdleAnimation;
+		LocomotionBlendSpace = !bDrawn && Weapon->HolsteredLocomotionBlendSpace ? Weapon->HolsteredLocomotionBlendSpace
+		                                                                        : Weapon->LocomotionBlendSpace;
 		WeaponCarryPose = Weapon->UpperBodyCarryPose ? Weapon->UpperBodyCarryPose : LocomotionIdle;
-		const float TargetWeight = Weapon->UpperBodyCarryPose && !Combat->IsAttacking() ? 1.0f : 0.0f;
+		const float TargetWeight = bDrawn && Weapon->UpperBodyCarryPose && !Combat->IsAttacking() ? 1.0f : 0.0f;
 		WeaponCarryWeight = FMath::FInterpConstantTo(
 		    WeaponCarryWeight, TargetWeight, DeltaSeconds, TargetWeight > WeaponCarryWeight ? 8.0f : 20.0f);
 	}
