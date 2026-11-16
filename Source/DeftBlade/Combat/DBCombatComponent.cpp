@@ -163,12 +163,15 @@ void UDBCombatComponent::StopWeaponPresentation()
 	}
 }
 
-void UDBCombatComponent::CommitWeaponAttachment(int32 MontageInstanceId, bool bDrawn)
+bool UDBCombatComponent::CommitWeaponAttachment(int32 MontageInstanceId, bool bDrawn)
 {
 	if (MontageInstanceId == WeaponPresentationInstanceId && bDrawn == bDrawingWeapon && CanProcessInput())
 	{
+		const bool bWasDrawn = bWeaponDrawn;
 		AttachWeapon(bDrawn);
+		return bWasDrawn != bWeaponDrawn;
 	}
+	return false;
 }
 
 void UDBCombatComponent::WeaponPresentationEnded(UAnimMontage*, bool bInterrupted, int32 InstanceId)
@@ -900,6 +903,10 @@ void UDBCombatComponent::ApplySlamImpact(const FHitResult& LandingHit)
 	}
 	const uint64 ActionId = ActiveActionId;
 	const FVector Origin = LandingHit.ImpactPoint + LandingHit.ImpactNormal * 4.0f;
+	if (WeaponData->SlamSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, WeaponData->SlamSound, Origin);
+	}
 	if (WeaponData->SlamEffect)
 	{
 		UNiagaraFunctionLibrary::SpawnSystemAtLocation(GetWorld(), WeaponData->SlamEffect, Origin,

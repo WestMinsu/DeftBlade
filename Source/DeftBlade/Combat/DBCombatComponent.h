@@ -89,7 +89,7 @@ public:
 		return bWeaponDrawn;
 	}
 	/** Only the current presentation montage's branching point may move the weapon. */
-	void CommitWeaponAttachment(int32 MontageInstanceId, bool bDrawn);
+	bool CommitWeaponAttachment(int32 MontageInstanceId, bool bDrawn);
 	/** Idle equips immediately; authored ground-attack links buffer one switch until ComboStart. */
 	bool TryEquipWeapon(UDBWeaponData* NewWeapon);
 	const UDBWeaponData* GetWeaponData() const

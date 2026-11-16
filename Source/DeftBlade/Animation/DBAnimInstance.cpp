@@ -5,6 +5,46 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundBase.h"
+
+void UDBAnimInstance::PlayFootstep(FName FootBone)
+{
+	const ACharacter* Character = Cast<ACharacter>(TryGetPawnOwner());
+	if (!Character || !GetWorld() || !GetWorld()->IsGameWorld() || GetWorld()->IsPaused() || FootstepSounds.IsEmpty()
+	    || !Character->GetCharacterMovement()->IsMovingOnGround())
+	{
+		return;
+	}
+	const UDBCombatComponent* Combat = Character->FindComponentByClass<UDBCombatComponent>();
+	const float Speed = Character->GetVelocity().Size2D();
+	const double Now = GetWorld()->GetTimeSeconds();
+	if (Speed < 20.0f || (Combat && Combat->GetActionState() != EDBActionState::None) || Now - LastFootstepAt < 0.10)
+	{
+		return;
+	}
+	// Blended locomotion clips can notify in the same frame. Keep the gate on this character's instance.
+	const int32 Count = FootstepSounds.Num();
+	int32 Index = FMath::RandHelper(Count);
+	if (Count > 1 && FootstepSounds.IsValidIndex(LastFootstepSoundIndex))
+	{
+		Index = FMath::RandHelper(Count - 1);
+		Index += Index >= LastFootstepSoundIndex ? 1 : 0;
+	}
+	USoundBase* Sound = FootstepSounds[Index];
+	if (!Sound)
+	{
+		return;
+	}
+	const float Volume =
+	    FMath::Clamp(0.35f + Speed / 900.0f, 0.45f, 1.0f) * (Character->IsPlayerControlled() ? 1.0f : 0.4f);
+	UGameplayStatics::PlaySoundAtLocation(this, Sound, GetSkelMeshComponent()->GetSocketLocation(FootBone),
+	    FRotator::ZeroRotator, Volume, FMath::FRandRange(0.96f, 1.04f), 0.0f, nullptr, nullptr, Character);
+	LastFootstepAt = Now;
+	LastFootstepSoundIndex = Index;
+}
 
 void UDBAnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 {

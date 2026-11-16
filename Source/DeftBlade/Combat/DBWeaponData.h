@@ -200,6 +200,9 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Air Slam")
 	TObjectPtr<UNiagaraSystem> SlamEffect;
 
+	UPROPERTY(EditAnywhere, Category = "Air Slam")
+	TObjectPtr<USoundBase> SlamSound;
+
 	/** Optional presentation for the existing attack protection window; does not grant protection. */
 	UPROPERTY(EditAnywhere, Category = "Protection Feedback")
 	TObjectPtr<UMaterialInterface> AttackProtectionMaterial;

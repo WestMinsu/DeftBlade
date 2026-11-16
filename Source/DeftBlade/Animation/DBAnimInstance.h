@@ -6,12 +6,16 @@
 
 class UAnimSequence;
 class UBlendSpace;
+class USoundBase;
 
 /** Weapon locomotion inputs and limited lock-on glance; slots and foot IK stay in the AnimBP. */
 UCLASS()
 class DEFTBLADE_API UDBAnimInstance : public UAnimInstance
 {
 	GENERATED_BODY()
+public:
+	void PlayFootstep(FName FootBone);
+
 protected:
 	virtual void NativeUpdateAnimation(float DeltaSeconds) override;
 	/** Class defaults are preview fallbacks when the AnimBP editor has no character owner. */
@@ -27,4 +31,10 @@ protected:
 	FRotator LockNeckRotation = FRotator::ZeroRotator;
 	UPROPERTY(BlueprintReadOnly, Category = "Targeting")
 	FRotator LockHeadRotation = FRotator::ZeroRotator;
+	UPROPERTY(EditDefaultsOnly, Category = "Audio")
+	TArray<TObjectPtr<USoundBase>> FootstepSounds;
+
+private:
+	double LastFootstepAt = -1.0;
+	int32 LastFootstepSoundIndex = INDEX_NONE;
 };
