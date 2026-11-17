@@ -560,6 +560,7 @@ void UDBCombatComponent::TickComponent(
 		ResetCombat();
 		return;
 	}
+	RestoreSlamCollision();
 	if (ActionState == EDBActionState::HitReaction)
 	{
 		ACharacter* Character = CastChecked<ACharacter>(GetOwner());
@@ -847,6 +848,7 @@ bool UDBCombatComponent::FinishAction(uint64 ExpectedActionId, bool bInterrupted
 	ChainStartsAt = 0.0;
 	HeldSlideTime = 0.0;
 	bBlendingToSprint = false;
+	RestoreSlamCollision();
 	return true;
 }
 
@@ -860,6 +862,12 @@ void UDBCombatComponent::HandleLanding(const FHitResult& Hit)
 	if (GetAttackId() == EDBAttackId::AirHeavy && !bAttackLanded)
 	{
 		const uint64 ActionId = ActiveActionId;
+		// CMC can land before this frame's mesh callback. Flush the last swept descent first.
+		TraceSlamDescent();
+		if (ActiveActionId != ActionId)
+		{
+			return;
+		}
 		bAttackLanded = true;
 		bAttackMovementStarted = true;
 		ApplySlamImpact(Hit);
@@ -944,6 +952,72 @@ void UDBCombatComponent::ApplySlamImpact(const FHitResult& LandingHit)
 		const FVector Direction = (Contact - QueryOrigin).GetSafeNormal(UE_SMALL_NUMBER, FVector::UpVector);
 		const FHitResult Hit(Target, Component, Contact, -Direction);
 		ApplyAttackHit(Hit, Direction, QueryOrigin, ActionId);
+	}
+}
+
+void UDBCombatComponent::BeginSlamCollision()
+{
+	UCapsuleComponent* Capsule = CastChecked<ACharacter>(GetOwner())->GetCapsuleComponent();
+	if (!bSlamIgnoresPawns && Capsule->GetCollisionResponseToChannel(ECC_Pawn) == ECR_Block)
+	{
+		// Keep terrain blocking. Another character must not become the slam's landing surface.
+		bSlamIgnoresPawns = true;
+		Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+	}
+}
+
+void UDBCombatComponent::RestoreSlamCollision(bool bForce)
+{
+	if (!bSlamIgnoresPawns || (!bForce && GetAttackId() == EDBAttackId::AirHeavy))
+	{
+		return;
+	}
+	UCapsuleComponent* Capsule = CastChecked<ACharacter>(GetOwner())->GetCapsuleComponent();
+	if (!bForce)
+	{
+		TArray<FOverlapResult> Overlaps;
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(DBSlamSeparation), false, GetOwner());
+		GetWorld()->OverlapMultiByObjectType(Overlaps, Capsule->GetComponentLocation(), Capsule->GetComponentQuat(),
+		    FCollisionObjectQueryParams(ECC_Pawn), Capsule->GetCollisionShape(-1.0f), Params);
+		for (const FOverlapResult& Overlap : Overlaps)
+		{
+			const UPrimitiveComponent* Other = Overlap.GetComponent();
+			if (IsValid(Other) && Other->GetCollisionResponseToChannel(Capsule->GetCollisionObjectType()) == ECR_Block)
+			{
+				// Re-enabling blocking inside a capsule would cause a random CMC jump-off/depenetration.
+				return;
+			}
+		}
+	}
+	Capsule->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+	bSlamIgnoresPawns = false;
+}
+
+void UDBCombatComponent::TraceSlamDescent()
+{
+	if (GetAttackId() != EDBAttackId::AirHeavy || !bAttackMovementStarted || bAttackLanded)
+	{
+		return;
+	}
+	ACharacter* Character = CastChecked<ACharacter>(GetOwner());
+	const UCapsuleComponent* Capsule = Character->GetCapsuleComponent();
+	const FVector Offset(0, 0, Capsule->GetScaledCapsuleHalfHeight() - Capsule->GetScaledCapsuleRadius());
+	const FVector From = PreviousSlamLocation - Offset;
+	const FVector To = Character->GetActorLocation() - Offset;
+	PreviousSlamLocation = Character->GetActorLocation();
+	const uint64 ActionId = ActiveActionId;
+	TArray<FHitResult> Hits;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(DBSlamDescent), false, GetOwner());
+	GetWorld()->SweepMultiByObjectType(Hits, From, To, FQuat::Identity, FCollisionObjectQueryParams(ECC_Pawn),
+	    FCollisionShape::MakeSphere(Capsule->GetScaledCapsuleRadius()), Params);
+	for (const FHitResult& Hit : Hits)
+	{
+		if (ActiveActionId != ActionId)
+		{
+			return;
+		}
+		// Share the existing hit set with blade contacts and the landing blast: one damage application.
+		ApplyAttackHit(Hit, -FVector::UpVector, From, ActionId);
 	}
 }
 
@@ -1053,6 +1127,7 @@ void UDBCombatComponent::UpdateAttackMovement(float DeltaTime)
 	{
 		bAttackMovementStarted = true;
 		StopAirMovement();
+		PreviousSlamLocation = Character->GetActorLocation();
 		Character->LaunchCharacter(FVector(0, 0, -SlamDownwardSpeed), false, true);
 	}
 }
@@ -1112,6 +1187,10 @@ void UDBCombatComponent::TryStartAttack()
 	                               : BufferedAction.Input == EDBActionInput::LightAttack;
 	ActionState = bLight ? EDBActionState::LightAttack : EDBActionState::HeavyAttack;
 	BufferedAction = {};
+	if (ActiveAttack.Id == EDBAttackId::AirHeavy)
+	{
+		BeginSlamCollision();
+	}
 	Character->StopJumping();
 	if (!bContinuing && Character->GetCharacterMovement()->IsMovingOnGround())
 	{
@@ -1434,6 +1513,10 @@ void UDBCombatComponent::BonesFinalized()
 	const FTransform CurrentMesh = Character->GetMesh()->GetComponentTransform();
 	const FTransform CurrentWeapon = GetTraceTransform(EDBHitTraceSource::Weapon);
 	TraceAttack(PreviousAttackPosition, Position, CurrentMesh, CurrentWeapon);
+	if (ActionId == ActiveActionId)
+	{
+		TraceSlamDescent();
+	}
 	if (ActionId != ActiveActionId)
 	{
 		return;
@@ -1791,8 +1874,24 @@ void UDBCombatComponent::ApplyAttackHit(
 				}
 			}
 		}
-		else if (ActiveAttack.GroundKnockbackDistance > 0.0f && Victim->GetCharacterMovement()->IsMovingOnGround())
+		if (Attack != EDBAttackId::Launcher && ActiveAttack.GroundKnockbackDistance > 0.0f
+		    && (Victim->GetCharacterMovement()->IsMovingOnGround() || Attack == EDBAttackId::AirHeavy))
 		{
+			float Distance = ActiveAttack.GroundKnockbackDistance;
+			if (Attack == EDBAttackId::AirHeavy)
+			{
+				// Clear the landing space without throwing nearby combo targets out of reach.
+				const ACharacter* Attacker = CastChecked<ACharacter>(GetOwner());
+				const float Clearance = Attacker->GetCapsuleComponent()->GetScaledCapsuleRadius()
+				                        + Victim->GetCapsuleComponent()->GetScaledCapsuleRadius() + 4.0f;
+				Distance =
+				    FMath::Clamp(Clearance - FVector::Dist2D(Attacker->GetActorLocation(), Victim->GetActorLocation()),
+				        0.0f, Distance);
+				if (Distance <= UE_SMALL_NUMBER)
+				{
+					return;
+				}
+			}
 			const FVector Away = (Victim->GetActorLocation() - GetOwner()->GetActorLocation())
 			                         .GetSafeNormal2D(UE_SMALL_NUMBER, GetOwner()->GetActorForwardVector());
 			auto* Movement = Victim->GetCharacterMovement();
@@ -1801,7 +1900,7 @@ void UDBCombatComponent::ApplyAttackHit(
 			Motion->Priority = 100;
 			Motion->AccumulateMode = ERootMotionAccumulateMode::Override;
 			Motion->Duration = .18f;
-			Motion->Force = Away * (ActiveAttack.GroundKnockbackDistance / Motion->Duration);
+			Motion->Force = Away * (Distance / Motion->Duration);
 			Motion->Settings.SetFlag(ERootMotionSourceSettingsFlags::IgnoreZAccumulate);
 			Motion->Settings.UnSetFlag(ERootMotionSourceSettingsFlags::DisablePartialEndTick);
 			// End horizontal motion without slowing a fall if collision carries the victim off a ledge.
@@ -1884,6 +1983,7 @@ void UDBCombatComponent::ResetCombat()
 		    ActiveActionId, BufferedAction.Id);
 	}
 	FinishAction(ActiveActionId);
+	RestoreSlamCollision(true);
 	StopAirMovement();
 	UCharacterMovementComponent* Movement = CastChecked<ACharacter>(GetOwner())->GetCharacterMovement();
 	if (TSharedPtr<FRootMotionSource> Knockback = Movement->GetRootMotionSource(TEXT("DBGroundKnockback")))

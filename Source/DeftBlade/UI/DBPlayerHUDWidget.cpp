@@ -15,6 +15,7 @@
 #include "Character/DBPlayerCharacter.h"
 #include "Input/Events.h"
 #include "Kismet/GameplayStatics.h"
+#include "UI/DBSettingsWidget.h"
 
 void UDBPlayerHUDWidget::NativeOnInitialized()
 {
@@ -22,6 +23,8 @@ void UDBPlayerHUDWidget::NativeOnInitialized()
 	RetryButton->OnClicked.AddDynamic(this, &ThisClass::Retry);
 	ResumeButton->OnClicked.AddDynamic(this, &ThisClass::ResumeGame);
 	RestartButton->OnClicked.AddDynamic(this, &ThisClass::Retry);
+	SettingsButton->OnClicked.AddDynamic(this, &ThisClass::OpenSettings);
+	SettingsPanel->OnBackRequested.BindUObject(this, &ThisClass::CloseSettings);
 	SetUsingGamepad(false);
 }
 
@@ -35,6 +38,7 @@ void UDBPlayerHUDWidget::SetUsingGamepad(bool bGamepad)
 	PauseHint->SetVisibility(KeyboardVisibility);
 	GamepadRetryHint->SetVisibility(GamepadVisibility);
 	GamepadPauseHint->SetVisibility(GamepadVisibility);
+	SettingsPanel->SetUsingGamepad(bGamepad);
 }
 
 void UDBPlayerHUDWidget::NativeConstruct()
@@ -61,6 +65,7 @@ void UDBPlayerHUDWidget::BindHealth(UDBHealthComponent* Health)
 	DamageFlash->SetRenderOpacity(0);
 	ResultPanel->SetVisibility(ESlateVisibility::Collapsed);
 	PausePanel->SetVisibility(ESlateVisibility::Collapsed);
+	SettingsPanel->SetVisibility(ESlateVisibility::Collapsed);
 	RetryButton->SetIsEnabled(true);
 	RestartButton->SetIsEnabled(true);
 	HealthSource = Health;
@@ -231,14 +236,48 @@ void UDBPlayerHUDWidget::ResumeGame()
 	}
 }
 
+void UDBPlayerHUDWidget::OpenSettings()
+{
+	if (Screen != EScreen::Pause)
+	{
+		return;
+	}
+	Screen = EScreen::Settings;
+	PausePanel->SetVisibility(ESlateVisibility::Collapsed);
+	SettingsPanel->RefreshValues();
+	SettingsPanel->SetVisibility(ESlateVisibility::Visible);
+	SettingsPanel->FocusFirstControl();
+}
+
+void UDBPlayerHUDWidget::CloseSettings()
+{
+	if (Screen != EScreen::Settings)
+	{
+		return;
+	}
+	SettingsPanel->Save();
+	SettingsPanel->SetVisibility(ESlateVisibility::Collapsed);
+	Screen = EScreen::Pause;
+	PausePanel->SetVisibility(ESlateVisibility::Visible);
+	SettingsButton->SetUserFocus(GetOwningPlayer());
+}
+
 FReply UDBPlayerHUDWidget::NativeOnPreviewKeyDown(const FGeometry& Geometry, const FKeyEvent& Event)
 {
 	if (Screen != EScreen::Gameplay
-	    && (Event.GetKey() == EKeys::Escape || Event.GetKey() == EKeys::Gamepad_Special_Right))
+	    && (Event.GetKey() == EKeys::Escape || Event.GetKey() == EKeys::Gamepad_Special_Right
+	        || Event.GetKey() == EKeys::Gamepad_FaceButton_Right))
 	{
-		if (Screen == EScreen::Pause && !Event.IsRepeat())
+		if (!Event.IsRepeat())
 		{
-			ResumeGame();
+			if (Screen == EScreen::Settings)
+			{
+				CloseSettings();
+			}
+			else if (Screen == EScreen::Pause)
+			{
+				ResumeGame();
+			}
 		}
 		return FReply::Handled();
 	}
@@ -251,9 +290,14 @@ void UDBPlayerHUDWidget::ReleaseMenuInput()
 	{
 		return;
 	}
-	const bool bPaused = Screen == EScreen::Pause;
+	const bool bPaused = Screen == EScreen::Pause || Screen == EScreen::Settings;
+	if (Screen == EScreen::Settings)
+	{
+		SettingsPanel->Save();
+	}
 	Screen = EScreen::Gameplay;
 	PausePanel->SetVisibility(ESlateVisibility::Collapsed);
+	SettingsPanel->SetVisibility(ESlateVisibility::Collapsed);
 	if (APlayerController* PC = GetOwningPlayer())
 	{
 		if (auto* Player = Cast<ADBPlayerCharacter>(PC->GetPawn()))
@@ -298,15 +342,24 @@ void UDBPlayerHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTi
 	if (Screen != EScreen::Gameplay)
 	{
 		APlayerController* PC = GetOwningPlayer();
-		const bool bMenuFocused = Screen == EScreen::Pause
-		                              ? ResumeButton->HasUserFocus(PC) || RestartButton->HasUserFocus(PC)
-		                              : RetryButton->HasUserFocus(PC);
+		const bool bMenuFocused =
+		    Screen == EScreen::Settings ? SettingsPanel->HasUserFocusedDescendants(PC)
+		    : Screen == EScreen::Pause
+		        ? ResumeButton->HasUserFocus(PC) || RestartButton->HasUserFocus(PC) || SettingsButton->HasUserFocus(PC)
+		        : RetryButton->HasUserFocus(PC);
 		// Opening the panel or clicking its background can leave Slate without a focused button.
 		if (PC && !bMenuFocused)
 		{
-			(Screen == EScreen::Pause ? ResumeButton : RetryButton)->SetUserFocus(PC);
+			if (Screen == EScreen::Settings)
+			{
+				SettingsPanel->FocusFirstControl();
+			}
+			else
+			{
+				(Screen == EScreen::Pause ? ResumeButton : RetryButton)->SetUserFocus(PC);
+			}
 		}
-		for (UButton* Button : {ResumeButton.Get(), RestartButton.Get(), RetryButton.Get()})
+		for (UButton* Button : {ResumeButton.Get(), RestartButton.Get(), SettingsButton.Get(), RetryButton.Get()})
 		{
 			const bool bSelected = Button->HasUserFocus(GetOwningPlayer()) || Button->IsHovered();
 			Button->SetBackgroundColor(

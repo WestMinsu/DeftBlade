@@ -286,6 +286,9 @@ private:
 	void SweepAttack(const FTransform& From, const FTransform& To, uint64 ActionId, EDBHitTraceSource Source);
 	void ApplyAttackHit(const FHitResult& Hit, const FVector& Direction, const FVector& TraceOrigin, uint64 ActionId);
 	void ApplySlamImpact(const FHitResult& LandingHit);
+	void TraceSlamDescent();
+	void BeginSlamCollision();
+	void RestoreSlamCollision(bool bForce = false);
 	bool CanParry() const;
 	void OpenParryWindow(const FVector& Direction);
 	bool TryParry(UDBCombatComponent& Attacker, const FVector& ImpactPoint);
@@ -349,4 +352,6 @@ private:
 	bool bProtectionFeedbackActive = false;
 	bool bAttackMovementStarted = false;
 	bool bAttackLanded = false;
+	bool bSlamIgnoresPawns = false;
+	FVector PreviousSlamLocation = FVector::ZeroVector;
 };

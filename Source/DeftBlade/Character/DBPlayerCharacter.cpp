@@ -12,6 +12,7 @@
 #include "EnhancedInputSubsystems.h"
 #include "EnhancedPlayerInput.h"
 #include "Engine/LocalPlayer.h"
+#include "Game/DBGameUserSettings.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/SpringArmComponent.h"
@@ -354,8 +355,10 @@ void ADBPlayerCharacter::LookMouse(const FInputActionValue& Value)
 		return;
 	}
 	const FVector2D Delta = Value.Get<FVector2D>();
-	AddControllerYawInput(Delta.X * MouseSensitivity.X);
-	AddControllerPitchInput(Delta.Y * MouseSensitivity.Y);
+	const auto* Settings = UDBGameUserSettings::Get();
+	const FVector2D Scale = Settings ? Settings->GetMouseLookScale() : FVector2D(1, 1);
+	AddControllerYawInput(Delta.X * MouseSensitivity.X * Scale.X);
+	AddControllerPitchInput(Delta.Y * MouseSensitivity.Y * Scale.Y);
 }
 
 void ADBPlayerCharacter::LookGamepad(const FInputActionValue& Value)
@@ -367,8 +370,10 @@ void ADBPlayerCharacter::LookGamepad(const FInputActionValue& Value)
 		return;
 	}
 	const float DeltaSeconds = GetWorld()->GetDeltaSeconds();
-	AddControllerYawInput(Stick.X * GamepadLookRate.X * DeltaSeconds);
-	AddControllerPitchInput(Stick.Y * GamepadLookRate.Y * DeltaSeconds);
+	const auto* Settings = UDBGameUserSettings::Get();
+	const FVector2D Scale = Settings ? Settings->GetGamepadLookScale() : FVector2D(1, 1);
+	AddControllerYawInput(Stick.X * GamepadLookRate.X * DeltaSeconds * Scale.X);
+	AddControllerPitchInput(Stick.Y * GamepadLookRate.Y * DeltaSeconds * Scale.Y);
 }
 
 void ADBPlayerCharacter::StopLookGamepad()

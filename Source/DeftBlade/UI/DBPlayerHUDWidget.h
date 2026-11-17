@@ -12,6 +12,7 @@ class UDBTargetingComponent;
 class UProgressBar;
 class UTextBlock;
 class UWidgetAnimation;
+class UDBSettingsWidget;
 
 UCLASS(Abstract)
 class DEFTBLADE_API UDBPlayerHUDWidget : public UUserWidget
@@ -59,6 +60,10 @@ protected:
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UButton> RestartButton;
 	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UButton> SettingsButton;
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UDBSettingsWidget> SettingsPanel;
+	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UWidget> RetryHint;
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UWidget> PauseHint;
@@ -75,6 +80,9 @@ private:
 	void ShowResult(bool bCompleted);
 	void ReleaseMenuInput();
 	UFUNCTION()
+	void OpenSettings();
+	void CloseSettings();
+	UFUNCTION()
 	void ResumeGame();
 	UFUNCTION()
 	void Retry();
@@ -88,6 +96,7 @@ private:
 	{
 		Gameplay,
 		Pause,
+		Settings,
 		Result
 	};
 	EScreen Screen = EScreen::Gameplay;

@@ -3,6 +3,7 @@
 #include "Combat/DBHealthComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "Game/DBCombatEncounter.h"
+#include "Game/DBGameUserSettings.h"
 #include "EngineUtils.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/LocalPlayer.h"
@@ -82,6 +83,10 @@ void ADBPlayerHUD::BeginPlay()
 		return;
 	}
 	SetActorTickEnabled(false);
+	if (const auto* Settings = UDBGameUserSettings::Get())
+	{
+		Settings->ApplyAudio(GetWorld());
+	}
 	PlayerWidget = CreateWidget<UDBPlayerHUDWidget>(PC, WidgetClass);
 	if (!PlayerWidget)
 	{
