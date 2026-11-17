@@ -124,6 +124,7 @@ void UDBPlayerHUDWidget::BindEncounter(ADBCombatEncounter* Encounter)
 
 void UDBPlayerHUDWidget::EncounterChanged()
 {
+	UpdateBossIntroduction();
 	if (BossPanel)
 	{
 		BossPanel->SetVisibility(
@@ -162,12 +163,48 @@ void UDBPlayerHUDWidget::EncounterChanged()
 			                           ? NSLOCTEXT("DeftBlade", "BossAhead", "AREA CLEAR - Proceed to the Warden")
 			                           : NSLOCTEXT("DeftBlade", "EncounterCleared", "AREA CLEAR - Exit unlocked"));
 			break;
+		case EDBEncounterState::BossIntroduction:
 		case EDBEncounterState::BossActive:
 			EncounterText->SetVisibility(ESlateVisibility::Collapsed);
 			break;
 		case EDBEncounterState::Completed:
 			EncounterText->SetVisibility(ESlateVisibility::Collapsed);
 			break;
+	}
+}
+
+void UDBPlayerHUDWidget::UpdateBossIntroduction()
+{
+	const float Progress = EncounterSource.IsValid() ? EncounterSource->GetBossIntroductionProgress() : -1.f;
+	const bool bIntroducing = Progress >= 0 && Screen == EScreen::Gameplay;
+	if (HealthPanel)
+	{
+		HealthPanel->SetVisibility(bIntroducing ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
+	}
+	if (!BossIntroductionPanel)
+	{
+		return;
+	}
+	BossIntroductionPanel->SetVisibility(
+	    bIntroducing ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	if (!bIntroducing)
+	{
+		return;
+	}
+	BossIntroductionPanel->SetRenderOpacity(FMath::Min3(Progress / .08f, 1.f, (1.f - Progress) / .15f));
+	if (BossIntroductionCard)
+	{
+		const float Reveal = FMath::SmoothStep(.16f, .28f, Progress);
+		BossIntroductionCard->SetRenderOpacity(Reveal * (1.f - FMath::SmoothStep(.72f, .85f, Progress)));
+		BossIntroductionCard->SetRenderTranslation(FVector2D(FMath::Lerp(-60.f, 0.f, Reveal), 0));
+	}
+	if (BossIntroductionName)
+	{
+		BossIntroductionName->SetText(EncounterSource->GetBossIntroductionName());
+	}
+	if (BossIntroductionSubtitle)
+	{
+		BossIntroductionSubtitle->SetText(EncounterSource->GetBossIntroductionSubtitle());
 	}
 }
 
@@ -339,6 +376,7 @@ void UDBPlayerHUDWidget::NativeDestruct()
 void UDBPlayerHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
+	UpdateBossIntroduction();
 	if (Screen != EScreen::Gameplay)
 	{
 		APlayerController* PC = GetOwningPlayer();

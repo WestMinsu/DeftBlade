@@ -53,6 +53,16 @@ protected:
 	TObjectPtr<UWidget> BossPanel;
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UProgressBar> BossHealthBar;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UWidget> HealthPanel;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UWidget> BossIntroductionPanel;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UWidget> BossIntroductionCard;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> BossIntroductionName;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> BossIntroductionSubtitle;
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UWidget> PausePanel;
 	UPROPERTY(meta = (BindWidget))
@@ -75,6 +85,7 @@ protected:
 private:
 	void HealthChanged(float Current, float Maximum);
 	void EncounterChanged();
+	void UpdateBossIntroduction();
 	void BossHealthChanged(float Current, float Maximum);
 	void ShowDeath();
 	void ShowResult(bool bCompleted);

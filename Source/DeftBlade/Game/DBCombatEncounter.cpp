@@ -12,6 +12,11 @@
 #include "Engine/TriggerBox.h"
 #include "Engine/World.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/PlayerController.h"
+#include "Camera/CameraActor.h"
+#include "Camera/CameraComponent.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
 
 ADBCombatEncounter::ADBCombatEncounter()
 {
@@ -90,8 +95,7 @@ void ADBCombatEncounter::TryStart(AActor* Actor)
 	{
 		return;
 	}
-	EncounterPlayer = Player;
-	Player->FindComponentByClass<UDBHealthComponent>()->OnDeath.AddUObject(this, &ThisClass::PlayerDied);
+	BindPlayer(Player);
 	EntryTrigger->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	SetState(EDBEncounterState::Active);
 	CheckCleared();
@@ -110,16 +114,136 @@ void ADBCombatEncounter::FinishEntered(AActor*, AActor* OtherActor)
 	{
 		return;
 	}
+	BindPlayer(Player);
 	Player->FindComponentByClass<UDBCombatComponent>()->ResetCombat();
 	Player->StopJumping();
 	Player->GetCharacterMovement()->StopMovementImmediately();
 	if (IsValid(Boss) && !Boss->FindComponentByClass<UDBHealthComponent>()->IsDead())
 	{
-		SetState(EDBEncounterState::BossActive);
-		Boss->Activate(Player);
+		StartBossIntroduction();
 		return;
 	}
 	SetState(EDBEncounterState::Completed);
+}
+
+void ADBCombatEncounter::BindPlayer(ADBPlayerCharacter* Player)
+{
+	if (EncounterPlayer.Get() == Player)
+	{
+		return;
+	}
+	if (EncounterPlayer.IsValid())
+	{
+		EncounterPlayer->FindComponentByClass<UDBHealthComponent>()->OnDeath.RemoveAll(this);
+	}
+	EncounterPlayer = Player;
+	Player->FindComponentByClass<UDBHealthComponent>()->OnDeath.AddUObject(this, &ThisClass::PlayerDied);
+}
+
+float ADBCombatEncounter::GetBossIntroductionProgress() const
+{
+	return BossIntroductionStartedAt >= 0 ? FMath::Clamp((GetWorld()->GetTimeSeconds() - BossIntroductionStartedAt)
+	                                                         / FMath::Max(BossIntroductionDuration, 2.f),
+	                                            0., 1.)
+	                                      : -1.f;
+}
+
+void ADBCombatEncounter::StartBossIntroduction()
+{
+	auto* PC = Cast<APlayerController>(EncounterPlayer->GetController());
+	if (!PC)
+	{
+		return;
+	}
+	EncounterPlayer->ResetGameplayInput();
+	IntroductionController = PC;
+	PreviousViewTarget = PC->GetViewTarget();
+	IntroductionCamera = GetWorld()->SpawnActor<ACameraActor>();
+	if (!IntroductionCamera)
+	{
+		FinishBossIntroduction(true);
+		return;
+	}
+	IntroductionCamera->GetCameraComponent()->FieldOfView = 48.f;
+	IntroductionCamera->GetCameraComponent()->bConstrainAspectRatio = false;
+	IntroductionCamera->GetCameraComponent()->PostProcessBlendWeight = 0.f;
+	PC->SetCinematicMode(true, false, false, true, true);
+	BossIntroductionStartedAt = GetWorld()->GetTimeSeconds();
+	bReturningFromIntroduction = false;
+	SetState(EDBEncounterState::BossIntroduction);
+	SetActorTickEnabled(true);
+	UpdateBossIntroduction();
+	PC->SetViewTargetWithBlend(IntroductionCamera, .3f, VTBlend_Cubic);
+	if (BossIntroductionMontage)
+	{
+		if (UAnimInstance* Anim = Boss->GetMesh()->GetAnimInstance())
+		{
+			Anim->Montage_Play(BossIntroductionMontage);
+		}
+	}
+}
+
+void ADBCombatEncounter::UpdateBossIntroduction()
+{
+	APlayerController* PC = IntroductionController.Get();
+	if (!PC || !EncounterPlayer.IsValid() || PC->GetPawn() != EncounterPlayer.Get() || !IsValid(Boss))
+	{
+		FinishBossIntroduction(false);
+		SetState(EDBEncounterState::Cleared);
+		return;
+	}
+	const float Progress = GetBossIntroductionProgress();
+	const float Move = FMath::InterpEaseInOut(0.f, 1.f, FMath::Clamp(Progress / .85f, 0.f, 1.f), 2.f);
+	const FVector Forward = Boss->GetActorForwardVector(), Right = Boss->GetActorRightVector();
+	const FVector Location = Boss->GetActorLocation() + Forward * FMath::Lerp(340.f, 285.f, Move)
+	                         + Right * FMath::Lerp(155.f, 110.f, Move) - FVector(0, 0, 20.f);
+	const FVector Focus = Boss->GetActorLocation() + Right * 55.f + FVector(0, 0, 20.f);
+	IntroductionCamera->SetActorLocationAndRotation(Location, (Focus - Location).Rotation());
+	if (!bReturningFromIntroduction && Progress >= .85f)
+	{
+		bReturningFromIntroduction = true;
+		PC->SetViewTargetWithBlend(PreviousViewTarget.IsValid() ? PreviousViewTarget.Get() : EncounterPlayer.Get(),
+		    FMath::Max(BossIntroductionDuration, 2.f) * .15f, VTBlend_Cubic);
+	}
+	if (Progress >= 1.f)
+	{
+		FinishBossIntroduction(true);
+	}
+}
+
+void ADBCombatEncounter::FinishBossIntroduction(bool bStartFight)
+{
+	// Release exactly the cinematic input lock we installed, including abort/unload paths.
+	if (APlayerController* PC = IntroductionController.Get())
+	{
+		PC->SetCinematicMode(false, false, false, true, true);
+		PC->FlushPressedKeys();
+		if (!GetWorld()->bIsTearingDown)
+		{
+			PC->SetViewTarget(PreviousViewTarget.IsValid() ? PreviousViewTarget.Get() : PC->GetPawn());
+		}
+	}
+	if (IsValid(Boss) && BossIntroductionMontage)
+	{
+		if (UAnimInstance* Anim = Boss->GetMesh()->GetAnimInstance())
+		{
+			Anim->Montage_Stop(.15f, BossIntroductionMontage);
+		}
+	}
+	if (IntroductionCamera)
+	{
+		IntroductionCamera->Destroy();
+		IntroductionCamera = nullptr;
+	}
+	IntroductionController.Reset();
+	PreviousViewTarget.Reset();
+	BossIntroductionStartedAt = -1;
+	SetActorTickEnabled(false);
+	if (bStartFight && IsValid(Boss) && EncounterPlayer.IsValid())
+	{
+		SetState(EDBEncounterState::BossActive);
+		Boss->Activate(EncounterPlayer.Get());
+	}
 }
 
 void ADBCombatEncounter::BossDefeated()
@@ -200,6 +324,11 @@ void ADBCombatEncounter::StartReinforcements()
 void ADBCombatEncounter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	if (BossIntroductionStartedAt >= 0)
+	{
+		UpdateBossIntroduction();
+		return;
+	}
 	if (GateOpenStartedAt < 0)
 	{
 		return;
@@ -219,6 +348,7 @@ void ADBCombatEncounter::Tick(float DeltaSeconds)
 
 void ADBCombatEncounter::PlayerDied()
 {
+	FinishBossIntroduction(false);
 	GateOpenStartedAt = -1;
 	SetActorTickEnabled(false);
 }
@@ -245,7 +375,7 @@ void ADBCombatEncounter::UpdateGates()
 	const bool bCleared = State == EDBEncounterState::Cleared || State == EDBEncounterState::Completed;
 	SetGate(ExitGate, !bCleared);
 	SetGate(ReinforcementGate, !bCleared && (State != EDBEncounterState::Reinforcements || GateOpenStartedAt >= 0));
-	SetGate(BossGate, State == EDBEncounterState::BossActive);
+	SetGate(BossGate, State == EDBEncounterState::BossActive || State == EDBEncounterState::BossIntroduction);
 	if (IsValid(FinishArea))
 	{
 		FinishArea->SetActorEnableCollision(State == EDBEncounterState::Cleared);
@@ -254,6 +384,7 @@ void ADBCombatEncounter::UpdateGates()
 
 void ADBCombatEncounter::EndPlay(const EEndPlayReason::Type Reason)
 {
+	FinishBossIntroduction(false);
 	if (IsValid(Boss))
 	{
 		Boss->FindComponentByClass<UDBHealthComponent>()->OnDeath.RemoveAll(this);

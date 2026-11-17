@@ -11,6 +11,9 @@ class ATargetPoint;
 class ATriggerBox;
 class UBoxComponent;
 class UStaticMeshComponent;
+class ACameraActor;
+class APlayerController;
+class UAnimMontage;
 
 UENUM(BlueprintType)
 enum class EDBEncounterState : uint8
@@ -20,7 +23,8 @@ enum class EDBEncounterState : uint8
 	Cleared,
 	Reinforcements,
 	Completed,
-	BossActive
+	BossActive,
+	BossIntroduction
 };
 
 USTRUCT(BlueprintType)
@@ -54,6 +58,15 @@ public:
 	{
 		return Boss;
 	}
+	float GetBossIntroductionProgress() const;
+	const FText& GetBossIntroductionName() const
+	{
+		return BossIntroductionName;
+	}
+	const FText& GetBossIntroductionSubtitle() const
+	{
+		return BossIntroductionSubtitle;
+	}
 
 protected:
 	virtual void BeginPlay() override;
@@ -75,6 +88,14 @@ protected:
 	TObjectPtr<ADBBossCharacter> Boss;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Encounter|Boss")
 	TObjectPtr<UStaticMeshComponent> BossGate;
+	UPROPERTY(EditAnywhere, Category = "Encounter|Boss|Introduction")
+	FText BossIntroductionName = NSLOCTEXT("DeftBlade", "BossIntroductionName", "WARDEN");
+	UPROPERTY(EditAnywhere, Category = "Encounter|Boss|Introduction")
+	FText BossIntroductionSubtitle = NSLOCTEXT("DeftBlade", "BossIntroductionSubtitle", "IRONCLAD SENTINEL");
+	UPROPERTY(EditAnywhere, Category = "Encounter|Boss|Introduction")
+	TObjectPtr<UAnimMontage> BossIntroductionMontage;
+	UPROPERTY(EditAnywhere, Category = "Encounter|Boss|Introduction", meta = (ClampMin = "2", Units = "s"))
+	float BossIntroductionDuration = 3.6f;
 	/** One optional group, spawned behind the side entrance after the assigned enemies fall. */
 	UPROPERTY(EditInstanceOnly, Category = "Encounter|Reinforcements")
 	TArray<FDBReinforcementSpawn> Reinforcements;
@@ -98,12 +119,22 @@ private:
 	void BossDefeated();
 	void StartReinforcements();
 	void BindEnemy(ADBEnemyCharacter* Enemy);
+	void BindPlayer(ADBPlayerCharacter* Player);
+	void StartBossIntroduction();
+	void UpdateBossIntroduction();
+	void FinishBossIntroduction(bool bStartFight);
 	void PlayerDied();
 	void SetState(EDBEncounterState NewState);
 	void UpdateGates();
 	TWeakObjectPtr<ADBPlayerCharacter> EncounterPlayer;
 	FVector GateClosedLocation = FVector::ZeroVector;
 	double GateOpenStartedAt = -1;
+	double BossIntroductionStartedAt = -1;
+	bool bReturningFromIntroduction = false;
+	TWeakObjectPtr<APlayerController> IntroductionController;
+	TWeakObjectPtr<AActor> PreviousViewTarget;
+	UPROPERTY(Transient)
+	TObjectPtr<ACameraActor> IntroductionCamera;
 
 	UPROPERTY(
 	    VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Encounter", meta = (AllowPrivateAccess = "true"))
