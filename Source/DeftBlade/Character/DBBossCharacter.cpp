@@ -5,7 +5,7 @@
 #include "Combat/DBCombatComponent.h"
 #include "Combat/DBHealthComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "Components/TextRenderComponent.h"
+#include "Components/WidgetComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
 ADBBossCharacter::ADBBossCharacter()
@@ -25,7 +25,7 @@ ADBBossCharacter::ADBBossCharacter()
 void ADBBossCharacter::SharePose()
 {
 	GetMesh()->SetVisibility(false, false);
-	HealthText->SetVisibility(false);
+	HealthDisplay->SetVisibility(false);
 	for (USkeletalMeshComponent* Part : Armour)
 	{
 		Part->SetLeaderPoseComponent(GetMesh(), true, false);

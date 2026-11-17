@@ -22,6 +22,19 @@ void UDBPlayerHUDWidget::NativeOnInitialized()
 	RetryButton->OnClicked.AddDynamic(this, &ThisClass::Retry);
 	ResumeButton->OnClicked.AddDynamic(this, &ThisClass::ResumeGame);
 	RestartButton->OnClicked.AddDynamic(this, &ThisClass::Retry);
+	SetUsingGamepad(false);
+}
+
+void UDBPlayerHUDWidget::SetUsingGamepad(bool bGamepad)
+{
+	const ESlateVisibility KeyboardVisibility =
+	    bGamepad ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible;
+	const ESlateVisibility GamepadVisibility =
+	    bGamepad ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed;
+	RetryHint->SetVisibility(KeyboardVisibility);
+	PauseHint->SetVisibility(KeyboardVisibility);
+	GamepadRetryHint->SetVisibility(GamepadVisibility);
+	GamepadPauseHint->SetVisibility(GamepadVisibility);
 }
 
 void UDBPlayerHUDWidget::NativeConstruct()
@@ -70,8 +83,6 @@ void UDBPlayerHUDWidget::BindHealth(UDBHealthComponent* Health)
 void UDBPlayerHUDWidget::HealthChanged(float Current, float Maximum)
 {
 	HealthBar->SetPercent(Maximum > 0 ? FMath::Clamp(Current / Maximum, 0.f, 1.f) : 0);
-	HealthText->SetText(FText::Format(NSLOCTEXT("DeftBlade", "PlayerHP", "{0} / {1}"),
-	    FText::AsNumber(FMath::CeilToInt(Current)), FText::AsNumber(FMath::CeilToInt(Maximum))));
 	if (Current < PreviousHealth)
 	{
 		StopAnimation(DamageFlashAnimation);
@@ -284,22 +295,22 @@ void UDBPlayerHUDWidget::NativeDestruct()
 void UDBPlayerHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
-	if (bRestoreMenuFocus)
+	if (Screen != EScreen::Gameplay)
 	{
-		// Activation can overwrite the first attempt; finish once focus survives to the next tick.
 		APlayerController* PC = GetOwningPlayer();
-		if (Screen != EScreen::Gameplay && PC)
+		const bool bMenuFocused = Screen == EScreen::Pause
+		                              ? ResumeButton->HasUserFocus(PC) || RestartButton->HasUserFocus(PC)
+		                              : RetryButton->HasUserFocus(PC);
+		// Opening the panel or clicking its background can leave Slate without a focused button.
+		if (PC && !bMenuFocused)
 		{
-			UButton* MenuButton = Screen == EScreen::Pause ? ResumeButton : RetryButton;
-			bRestoreMenuFocus = !MenuButton->HasUserFocus(PC);
-			if (bRestoreMenuFocus)
-			{
-				MenuButton->SetUserFocus(PC);
-			}
+			(Screen == EScreen::Pause ? ResumeButton : RetryButton)->SetUserFocus(PC);
 		}
-		else
+		for (UButton* Button : {ResumeButton.Get(), RestartButton.Get(), RetryButton.Get()})
 		{
-			bRestoreMenuFocus = false;
+			const bool bSelected = Button->HasUserFocus(GetOwningPlayer()) || Button->IsHovered();
+			Button->SetBackgroundColor(
+			    bSelected ? FLinearColor(0.33f, 0.035f, 0.055f) : FLinearColor(0.025f, 0.03f, 0.037f));
 		}
 	}
 	FVector2D Position;

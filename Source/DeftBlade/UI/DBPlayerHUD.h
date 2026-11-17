@@ -5,6 +5,7 @@
 #include "DBPlayerHUD.generated.h"
 
 class UDBPlayerHUDWidget;
+class IInputProcessor;
 
 UCLASS()
 class DEFTBLADE_API ADBPlayerHUD : public AHUD
@@ -27,4 +28,5 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UDBPlayerHUDWidget> PlayerWidget;
+	TSharedPtr<IInputProcessor> InputDeviceTracker;
 };

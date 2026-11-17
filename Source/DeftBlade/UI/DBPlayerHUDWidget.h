@@ -21,10 +21,7 @@ public:
 	void BindHealth(UDBHealthComponent* Health);
 	void BindEncounter(ADBCombatEncounter* Encounter);
 	void PauseGame();
-	void RequestMenuFocus()
-	{
-		bRestoreMenuFocus = true;
-	}
+	void SetUsingGamepad(bool bGamepad);
 
 protected:
 	virtual void NativeOnInitialized() override;
@@ -35,8 +32,6 @@ protected:
 
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UProgressBar> HealthBar;
-	UPROPERTY(meta = (BindWidget))
-	TObjectPtr<UTextBlock> HealthText;
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UBorder> DamageFlash;
 	UPROPERTY(meta = (BindWidget))
@@ -63,6 +58,14 @@ protected:
 	TObjectPtr<UButton> ResumeButton;
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UButton> RestartButton;
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UWidget> RetryHint;
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UWidget> PauseHint;
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UWidget> GamepadRetryHint;
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UWidget> GamepadPauseHint;
 
 private:
 	void HealthChanged(float Current, float Maximum);
@@ -89,5 +92,4 @@ private:
 	};
 	EScreen Screen = EScreen::Gameplay;
 	bool bRetryRequested = false;
-	bool bRestoreMenuFocus = false;
 };

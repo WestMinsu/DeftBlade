@@ -9,7 +9,7 @@ class UBehaviorTree;
 class UDBCombatComponent;
 class UDBHealthComponent;
 class UStaticMeshComponent;
-class UTextRenderComponent;
+class UWidgetComponent;
 class UAnimMontage;
 class ATargetPoint;
 
@@ -55,7 +55,7 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
 	TObjectPtr<UStaticMeshComponent> WeaponMesh;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "UI")
-	TObjectPtr<UTextRenderComponent> HealthText;
+	TObjectPtr<UWidgetComponent> HealthDisplay;
 	UPROPERTY(EditDefaultsOnly, Category = "AI")
 	TObjectPtr<UBehaviorTree> BehaviorTree;
 	UPROPERTY(EditDefaultsOnly, Category = "AI", meta = (ClampMin = "50"))
@@ -82,7 +82,6 @@ protected:
 	float LandingRecoveryDuration = 0.5f;
 
 private:
-	void UpdateHealthText(float Current, float Maximum);
 	void HandleDeath();
 	void ReactToParry(AActor* Defender);
 	void PlayHitReaction(UAnimMontage* Montage);

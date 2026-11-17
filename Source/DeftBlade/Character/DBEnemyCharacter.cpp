@@ -9,8 +9,9 @@
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Components/TextRenderComponent.h"
+#include "Components/WidgetComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "UI/DBHealthBarWidget.h"
 
 ADBEnemyCharacter::ADBEnemyCharacter()
 {
@@ -37,12 +38,13 @@ ADBEnemyCharacter::ADBEnemyCharacter()
 	WeaponMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponMesh"));
 	WeaponMesh->SetupAttachment(GetMesh(), TEXT("WeaponSocket"));
 	WeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	HealthText = CreateDefaultSubobject<UTextRenderComponent>(TEXT("HealthText"));
-	HealthText->SetupAttachment(GetRootComponent());
-	HealthText->SetRelativeLocation(FVector(0, 0, 125));
-	HealthText->SetHorizontalAlignment(EHTA_Center);
-	HealthText->SetWorldSize(22);
-	HealthText->SetTextRenderColor(FColor(255, 85, 65));
+	HealthDisplay = CreateDefaultSubobject<UWidgetComponent>(TEXT("HealthDisplay"));
+	HealthDisplay->SetupAttachment(GetRootComponent());
+	HealthDisplay->SetRelativeLocation(FVector(0, 0, 130));
+	HealthDisplay->SetWidgetSpace(EWidgetSpace::Screen);
+	HealthDisplay->SetDrawSize(FVector2D(100, 10));
+	HealthDisplay->SetPivot(FVector2D(0.5, 1.0));
+	HealthDisplay->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
 void ADBEnemyCharacter::OnConstruction(const FTransform& Transform)
@@ -56,9 +58,12 @@ void ADBEnemyCharacter::BeginPlay()
 	Super::BeginPlay();
 	CombatComponent->InitializeWeapon(WeaponMesh);
 	CombatComponent->OnParried.AddUObject(this, &ThisClass::ReactToParry);
-	HealthComponent->OnHealthChanged.AddUObject(this, &ThisClass::UpdateHealthText);
 	HealthComponent->OnDeath.AddUObject(this, &ThisClass::HandleDeath);
-	UpdateHealthText(HealthComponent->GetHealth(), HealthComponent->GetMaxHealth());
+	HealthDisplay->InitWidget();
+	if (auto* Widget = Cast<UDBHealthBarWidget>(HealthDisplay->GetUserWidgetObject()))
+	{
+		Widget->BindHealth(HealthComponent);
+	}
 }
 
 bool ADBEnemyCharacter::CanAct() const
@@ -246,11 +251,6 @@ void ADBEnemyCharacter::ReactionEnded(UAnimMontage*, bool, int32 InstanceId)
 	}
 }
 
-void ADBEnemyCharacter::UpdateHealthText(float Current, float Maximum)
-{
-	HealthText->SetText(FText::FromString(FString::Printf(TEXT("HP %.0f / %.0f"), Current, Maximum)));
-}
-
 void ADBEnemyCharacter::HandleDeath()
 {
 	if (auto* AI = Cast<ADBEnemyAIController>(GetController()))
@@ -263,7 +263,7 @@ void ADBEnemyCharacter::HandleDeath()
 	StopReaction();
 	GetCharacterMovement()->DisableMovement();
 	GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	HealthText->SetText(FText::FromString(TEXT("DOWN")));
+	HealthDisplay->SetVisibility(false);
 	GetMesh()->SetCollisionProfileName(TEXT("Ragdoll"));
 	GetMesh()->SetCollisionResponseToChannel(DBCollision::Melee, ECR_Ignore);
 	GetMesh()->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
