@@ -2,6 +2,8 @@
 
 #include "Animation/WidgetAnimation.h"
 #include "Combat/DBHealthComponent.h"
+#include "Combat/DBCombatScoreComponent.h"
+#include "Engine/World.h"
 #include "Combat/DBTargetingComponent.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
 #include "Components/CanvasPanelSlot.h"
@@ -69,6 +71,16 @@ void UDBPlayerHUDWidget::BindHealth(UDBHealthComponent* Health)
 	RetryButton->SetIsEnabled(true);
 	RestartButton->SetIsEnabled(true);
 	HealthSource = Health;
+	if (ScoreSource.IsValid())
+	{
+		ScoreSource->OnScoreChanged.RemoveAll(this);
+	}
+	ScoreSource = Health ? Health->GetOwner()->FindComponentByClass<UDBCombatScoreComponent>() : nullptr;
+	if (ScoreSource.IsValid())
+	{
+		ScoreSource->OnScoreChanged.AddUObject(this, &ThisClass::ScoreChanged);
+	}
+	ScoreChanged(0, EDBScoreEvent::Hit);
 	TargetingSource = Health ? Health->GetOwner()->FindComponentByClass<UDBTargetingComponent>() : nullptr;
 	LockOnMarker->SetVisibility(ESlateVisibility::Collapsed);
 	// An initial snapshot is not damage, even when binding to an already wounded pawn.
@@ -94,6 +106,58 @@ void UDBPlayerHUDWidget::HealthChanged(float Current, float Maximum)
 		PlayAnimation(DamageFlashAnimation);
 	}
 	PreviousHealth = Current;
+}
+
+void UDBPlayerHUDWidget::ScoreChanged(int32 Points, EDBScoreEvent Event)
+{
+	const FText Value = FText::AsNumber(ScoreSource.IsValid() ? ScoreSource->GetScore() : 0);
+	if (ScoreText)
+	{
+		ScoreText->SetText(Value);
+	}
+	if (ResultScoreText)
+	{
+		// The last killing contact can be confirmed after the result panel has opened.
+		ResultScoreText->SetText(FText::Format(NSLOCTEXT("DeftBlade", "ResultScore", "TACTICAL SCORE   {0}"), Value));
+	}
+	if (!ScoreEventText)
+	{
+		return;
+	}
+	if (Points <= 0)
+	{
+		ScoreEventUntil = 0.0;
+		ScoreEventText->SetVisibility(ESlateVisibility::Collapsed);
+		return;
+	}
+	FText Label;
+	switch (Event)
+	{
+		case EDBScoreEvent::Variation:
+			Label = NSLOCTEXT("DeftBlade", "ScoreVariation", "NEW TECHNIQUE");
+			break;
+		case EDBScoreEvent::Finish:
+			Label = NSLOCTEXT("DeftBlade", "ScoreFinish", "CHAIN FINISH");
+			break;
+		case EDBScoreEvent::VariedFinish:
+			Label = NSLOCTEXT("DeftBlade", "ScoreVariedFinish", "VARIED FINISH");
+			break;
+		case EDBScoreEvent::Parry:
+			Label = NSLOCTEXT("DeftBlade", "ScoreParry", "PARRY");
+			break;
+		default:
+			Label = NSLOCTEXT("DeftBlade", "ScoreHit", "STRIKE");
+			break;
+	}
+	ScoreEventText->SetText(
+	    FText::Format(NSLOCTEXT("DeftBlade", "ScoreAward", "{0}  +{1}"), Label, FText::AsNumber(Points)));
+	ScoreEventText->SetColorAndOpacity(FSlateColor(
+	    Event == EDBScoreEvent::Parry                                            ? FLinearColor(.95f, .72f, .25f)
+	    : Event == EDBScoreEvent::Finish || Event == EDBScoreEvent::VariedFinish ? FLinearColor(.4f, .86f, .75f)
+	                                                                             : FLinearColor(.7f, .7f, .68f)));
+	ScoreEventText->SetVisibility(ESlateVisibility::HitTestInvisible);
+	ScoreEventText->SetRenderOpacity(1.f);
+	ScoreEventUntil = GetWorld()->GetTimeSeconds() + 2.0;
 }
 
 void UDBPlayerHUDWidget::BindEncounter(ADBCombatEncounter* Encounter)
@@ -177,6 +241,12 @@ void UDBPlayerHUDWidget::UpdateBossIntroduction()
 {
 	const float Progress = EncounterSource.IsValid() ? EncounterSource->GetBossIntroductionProgress() : -1.f;
 	const bool bIntroducing = Progress >= 0 && Screen == EScreen::Gameplay;
+	if (ScorePanel)
+	{
+		ScorePanel->SetVisibility(!bIntroducing && Screen == EScreen::Gameplay && ScoreSource.IsValid()
+		                              ? ESlateVisibility::HitTestInvisible
+		                              : ESlateVisibility::Collapsed);
+	}
 	if (HealthPanel)
 	{
 		HealthPanel->SetVisibility(bIntroducing ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
@@ -402,6 +472,16 @@ void UDBPlayerHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTi
 			const bool bSelected = Button->HasUserFocus(GetOwningPlayer()) || Button->IsHovered();
 			Button->SetBackgroundColor(
 			    bSelected ? FLinearColor(0.33f, 0.035f, 0.055f) : FLinearColor(0.025f, 0.03f, 0.037f));
+		}
+	}
+	if (ScoreEventText && ScoreEventUntil > 0.0)
+	{
+		const double Remaining = ScoreEventUntil - GetWorld()->GetTimeSeconds();
+		ScoreEventText->SetRenderOpacity(FMath::Clamp(Remaining / .35, 0., 1.));
+		if (Remaining <= 0.0)
+		{
+			ScoreEventText->SetVisibility(ESlateVisibility::Collapsed);
+			ScoreEventUntil = 0.0;
 		}
 	}
 	FVector2D Position;

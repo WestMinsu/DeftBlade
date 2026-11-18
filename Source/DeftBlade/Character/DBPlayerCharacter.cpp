@@ -2,6 +2,7 @@
 
 #include "Camera/CameraComponent.h"
 #include "Combat/DBCombatComponent.h"
+#include "Combat/DBCombatScoreComponent.h"
 #include "Combat/DBCollisionChannels.h"
 #include "Combat/DBHealthComponent.h"
 #include "Combat/DBTargetingComponent.h"
@@ -60,6 +61,7 @@ ADBPlayerCharacter::ADBPlayerCharacter()
 	CombatComponent = CreateDefaultSubobject<UDBCombatComponent>(TEXT("Combat"));
 	HealthComponent = CreateDefaultSubobject<UDBHealthComponent>(TEXT("Health"));
 	TargetingComponent = CreateDefaultSubobject<UDBTargetingComponent>(TEXT("Targeting"));
+	ScoreComponent = CreateDefaultSubobject<UDBCombatScoreComponent>(TEXT("Score"));
 	CombatComponent->AddTickPrerequisiteComponent(TargetingComponent);
 	Movement->AddTickPrerequisiteComponent(CombatComponent);
 	WeaponMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponMesh"));

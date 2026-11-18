@@ -843,6 +843,7 @@ bool UDBCombatComponent::FinishAction(uint64 ExpectedActionId, bool bInterrupted
 	}
 	ActionState = EDBActionState::None;
 	ActiveActionId = 0;
+	ActiveAttackChainId = 0;
 	ActionStartedAt = 0.0;
 	MovementEndsAt = 0.0;
 	ChainStartsAt = 0.0;
@@ -1139,6 +1140,7 @@ void UDBCombatComponent::TryStartAttack()
 	UDBWeaponData* NextWeapon = bSwitching ? BufferedAction.Weapon.Get() : WeaponData.Get();
 	const FDBAttackDefinition* Definition = FindWeaponAttack(NextWeapon, NextAttack(BufferedAction.Input));
 	const bool bContinuing = ActionState != EDBActionState::None;
+	const uint64 ChainId = IsAttacking() ? ActiveAttackChainId : 0;
 	UAnimInstance* Anim = Character->GetMesh()->GetAnimInstance();
 	if (!Anim || !Definition || !Definition->IsValid() || !IsAttackMovementValid(Definition->Id)
 	    || (bSwitching && (!CanEquipWeapon(NextWeapon) || !Character->GetCharacterMovement()->IsMovingOnGround()))
@@ -1186,6 +1188,7 @@ void UDBCombatComponent::TryStartAttack()
 	const bool bLight = bSwitching ? ActiveAttack.Id >= EDBAttackId::Light1 && ActiveAttack.Id <= EDBAttackId::Light4
 	                               : BufferedAction.Input == EDBActionInput::LightAttack;
 	ActionState = bLight ? EDBActionState::LightAttack : EDBActionState::HeavyAttack;
+	ActiveAttackChainId = ChainId != 0 ? ChainId : ActiveActionId;
 	BufferedAction = {};
 	if (ActiveAttack.Id == EDBAttackId::AirHeavy)
 	{
@@ -1681,6 +1684,7 @@ bool UDBCombatComponent::TryParry(UDBCombatComponent& Attacker, const FVector& I
 	{
 		Attacker.ResetCombat();
 	}
+	OnParrySucceeded.Broadcast();
 	return true;
 }
 
@@ -1814,6 +1818,8 @@ void UDBCombatComponent::ApplyAttackHit(
 	// Snapshot before damage callbacks: an accepted boss launcher consumes its one opening.
 	const bool bCanLaunch = !Enemy || Enemy->CanBeLaunched();
 	const EDBAttackId Attack = ActiveAttack.Id;
+	const UDBWeaponData* AttackWeapon = WeaponData;
+	const uint64 ChainId = ActiveAttackChainId;
 	// Damage callbacks can finish/switch this action; retain the contact's authored feedback.
 	UParticleSystem* HitEffect = ActiveAttack.HitEffect;
 	USoundBase* HitSound = ActiveAttack.HitSound;
@@ -1848,8 +1854,13 @@ void UDBCombatComponent::ApplyAttackHit(
 			LastHitSound = UGameplayStatics::SpawnSoundAtLocation(this, HitSound, Hit.ImpactPoint);
 		}
 	}
+	if (Applied > 0.0f)
+	{
+		OnAttackHit.Broadcast(AttackWeapon, Attack, ActionId, ChainId);
+	}
 	ACharacter* Victim = Cast<ACharacter>(Target);
-	if (Applied > 0.0f && IsValid(Victim) && !Health->IsDead() && ActiveActionId == ActionId && !bResistsStagger)
+	if (Applied > 0.0f && IsValid(Victim) && IsValid(Health) && !Health->IsDead() && ActiveActionId == ActionId
+	    && !bResistsStagger)
 	{
 		if (Attack == EDBAttackId::Launcher)
 		{

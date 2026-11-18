@@ -8,6 +8,8 @@ class UBorder;
 class ADBCombatEncounter;
 class UButton;
 class UDBHealthComponent;
+class UDBCombatScoreComponent;
+enum class EDBScoreEvent : uint8;
 class UDBTargetingComponent;
 class UProgressBar;
 class UTextBlock;
@@ -33,6 +35,14 @@ protected:
 
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UProgressBar> HealthBar;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UWidget> ScorePanel;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> ScoreText;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> ScoreEventText;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> ResultScoreText;
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UBorder> DamageFlash;
 	UPROPERTY(meta = (BindWidget))
@@ -84,6 +94,7 @@ protected:
 
 private:
 	void HealthChanged(float Current, float Maximum);
+	void ScoreChanged(int32 Points, EDBScoreEvent Event);
 	void EncounterChanged();
 	void UpdateBossIntroduction();
 	void BossHealthChanged(float Current, float Maximum);
@@ -99,6 +110,8 @@ private:
 	void Retry();
 
 	TWeakObjectPtr<UDBHealthComponent> HealthSource;
+	TWeakObjectPtr<UDBCombatScoreComponent> ScoreSource;
+	double ScoreEventUntil = 0.0;
 	TWeakObjectPtr<ADBCombatEncounter> EncounterSource;
 	TWeakObjectPtr<UDBHealthComponent> BossHealthSource;
 	TWeakObjectPtr<UDBTargetingComponent> TargetingSource;

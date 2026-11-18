@@ -67,6 +67,7 @@ struct FDBBufferedAction
 DECLARE_MULTICAST_DELEGATE_TwoParams(FDBAttackWindowTraversed, float, float);
 DECLARE_MULTICAST_DELEGATE(FDBAttackStarted);
 DECLARE_MULTICAST_DELEGATE_OneParam(FDBParried, AActor*);
+DECLARE_MULTICAST_DELEGATE_FourParams(FDBAttackHit, const UDBWeaponData*, EDBAttackId, uint64, uint64);
 
 /** Owns action lifetime, one buffered input and finite ground/air evades. */
 UCLASS(ClassGroup = (DeftBlade), meta = (BlueprintSpawnableComponent))
@@ -142,6 +143,9 @@ public:
 	FDBAttackStarted OnAttackStarted;
 	/** This attacker was parried by the supplied defender. */
 	FDBParried OnParried;
+	/** Accepted damage, with the contact's weapon, attack, action and linked-chain IDs. */
+	FDBAttackHit OnAttackHit;
+	FSimpleMulticastDelegate OnParrySucceeded;
 
 protected:
 	virtual void BeginPlay() override;
@@ -317,6 +321,7 @@ private:
 	bool bAirLightComboUsed = false;
 	UPROPERTY(Transient)
 	FDBAttackDefinition ActiveAttack;
+	uint64 ActiveAttackChainId = 0;
 	int32 ActiveHitWindow = INDEX_NONE;
 	int32 AttackMontageInstanceId = INDEX_NONE;
 	int32 ReactionMontageInstanceId = INDEX_NONE;

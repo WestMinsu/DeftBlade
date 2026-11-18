@@ -7,6 +7,7 @@
 class UAnimMontage;
 class UCameraComponent;
 class UDBCombatComponent;
+class UDBCombatScoreComponent;
 class UDBHealthComponent;
 class UDBTargetingComponent;
 class UDBWeaponData;
@@ -48,6 +49,8 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
 	TObjectPtr<UDBCombatComponent> CombatComponent;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+	TObjectPtr<UDBCombatScoreComponent> ScoreComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
 	TObjectPtr<UDBHealthComponent> HealthComponent;
