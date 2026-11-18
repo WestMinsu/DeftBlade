@@ -136,6 +136,12 @@ public:
 	}
 	bool IsAttackWindowOpen() const;
 	bool HasAttackStaggerResistance() const;
+	/** Resolves the specific contact frozen by the one-time lesson. */
+	bool ParryTutorialAttack(UDBCombatComponent& Attacker, uint64 ActionId, const FVector& ImpactPoint);
+	bool HasPendingParryLesson() const
+	{
+		return OnTutorialParryContact.IsBound();
+	}
 	const FDBAttackDefinition* FindAttack(EDBAttackId Id) const;
 	/** Swept montage-time interval; a long frame crossing the whole window still emits once. */
 	FDBAttackWindowTraversed OnAttackWindowTraversed;
@@ -143,9 +149,11 @@ public:
 	FDBAttackStarted OnAttackStarted;
 	/** This attacker was parried by the supplied defender. */
 	FDBParried OnParried;
-	/** Accepted damage, with the contact's weapon, attack, action and linked-chain IDs. */
+	/** Scoring contact, with the weapon, attack, action and linked-chain IDs. */
 	FDBAttackHit OnAttackHit;
 	FSimpleMulticastDelegate OnParrySucceeded;
+	DECLARE_DELEGATE_RetVal_TwoParams(bool, FDBTutorialParryContact, UDBCombatComponent*, const FVector&);
+	FDBTutorialParryContact OnTutorialParryContact;
 
 protected:
 	virtual void BeginPlay() override;
@@ -265,7 +273,7 @@ private:
 	bool IsAttackMovementValid(EDBAttackId Id) const;
 	void TryStartJump();
 	void TryStartEvade(double Now);
-	void TryStartAttack();
+	void TryStartAttack(bool bTutorialParry = false);
 	void UpdateAttackMovement(float DeltaTime);
 	void StartAirMovement(float Duration, float UpwardSpeed = 0.0f);
 	void StartLauncherMovement();
@@ -296,6 +304,7 @@ private:
 	bool CanParry() const;
 	void OpenParryWindow(const FVector& Direction);
 	bool TryParry(UDBCombatComponent& Attacker, const FVector& ImpactPoint);
+	void ResolveParry(UDBCombatComponent& Attacker, const FVector& ImpactPoint, const FVector& Direction);
 	void StopParryHitStop();
 	void UpdateEvadeMovement(float DeltaTime);
 	bool IsEvadeMontageActive() const;

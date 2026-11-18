@@ -44,14 +44,16 @@ void ADBTrainingDummy::BeginPlay()
 	HealthComponent->OnHealthChanged.AddUObject(this, &ThisClass::UpdateHealthText);
 	HealthComponent->OnDeath.AddUObject(this, &ThisClass::HandleDeath);
 	UpdateHealthText(HealthComponent->GetHealth(), HealthComponent->GetMaxHealth());
+	HealthText->SetVisibility(!bRepeatablePractice);
 }
 
 float ADBTrainingDummy::TakeDamage(
     float Amount, const FDamageEvent& Event, AController* EventInstigator, AActor* Causer)
 {
-	const float Applied = HealthComponent->ApplyDamage(Amount);
+	const float Applied = bRepeatablePractice ? FMath::Max(Amount, 0.f) : HealthComponent->ApplyDamage(Amount);
 	if (Applied > 0.0f)
 	{
+		bPracticeHit = true;
 		Super::TakeDamage(Applied, Event, EventInstigator, Causer);
 		if (!HealthComponent->IsDead())
 		{

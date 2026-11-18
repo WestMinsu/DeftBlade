@@ -8,6 +8,7 @@ class UBorder;
 class ADBCombatEncounter;
 class UButton;
 class UDBHealthComponent;
+class UDBCombatComponent;
 class UDBCombatScoreComponent;
 enum class EDBScoreEvent : uint8;
 class UDBTargetingComponent;
@@ -25,6 +26,8 @@ public:
 	void BindEncounter(ADBCombatEncounter* Encounter);
 	void PauseGame();
 	void SetUsingGamepad(bool bGamepad);
+	bool HandleTutorialInput(const FKey& Key, bool bRepeat);
+	bool ShowParryLesson(UDBCombatComponent* Attacker, const FVector& ImpactPoint);
 
 protected:
 	virtual void NativeOnInitialized() override;
@@ -70,6 +73,16 @@ protected:
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UWidget> BossIntroductionCard;
 	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UWidget> TutorialShade;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UWidget> TutorialCard;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> TutorialTitle;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> TutorialBody;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> TutorialInput;
+	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> BossIntroductionName;
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> BossIntroductionSubtitle;
@@ -96,6 +109,8 @@ private:
 	void HealthChanged(float Current, float Maximum);
 	void ScoreChanged(int32 Points, EDBScoreEvent Event);
 	void EncounterChanged();
+	void UpdateTutorial();
+	void RenderTutorial();
 	void UpdateBossIntroduction();
 	void BossHealthChanged(float Current, float Maximum);
 	void ShowDeath();
@@ -121,8 +136,30 @@ private:
 		Gameplay,
 		Pause,
 		Settings,
-		Result
+		Result,
+		Tutorial
 	};
 	EScreen Screen = EScreen::Gameplay;
 	bool bRetryRequested = false;
+	bool bUsingGamepad = false;
+
+	enum class ETutorialHint : uint8
+	{
+		None,
+		Movement,
+		Practice,
+		PracticeCombos,
+		MixedCombo,
+		AirCombo,
+		Parry
+	};
+	ETutorialHint TutorialHint = ETutorialHint::None;
+	double TutorialStageStartedAt = 0.0;
+	double ParryInputAllowedAt = 0.0;
+	bool bParryInputReady = false;
+	bool bReachedPractice = false;
+	bool bParryTaught = false;
+	TWeakObjectPtr<UDBCombatComponent> TutorialAttacker;
+	FVector TutorialImpactPoint = FVector::ZeroVector;
+	uint64 TutorialAttackId = 0;
 };

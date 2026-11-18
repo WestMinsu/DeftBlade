@@ -276,6 +276,26 @@ void ADBPlayerCharacter::LightAttack()
 	CombatComponent->RequestAttack(false, GetAttackInputDirection());
 }
 
+FDBTutorialBindings ADBPlayerCharacter::GetTutorialBindings(bool bGamepad) const
+{
+	const auto FindBinding = [this, bGamepad](const UInputAction* Action)
+	{
+		if (GameplayMappingContext && Action)
+		{
+			for (const FEnhancedActionKeyMapping& Mapping : GameplayMappingContext->GetMappings())
+			{
+				if (Mapping.Action == Action && Mapping.Key.IsGamepadKey() == bGamepad)
+				{
+					return Mapping.Key;
+				}
+			}
+		}
+		return FKey();
+	};
+	return {FindBinding(LightAttackAction), FindBinding(HeavyAttackAction), FindBinding(JumpAction),
+	    FindBinding(EvadeAction)};
+}
+
 void ADBPlayerCharacter::HeavyAttack()
 {
 	StopSprinting();

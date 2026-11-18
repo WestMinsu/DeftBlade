@@ -7,6 +7,7 @@
 class ADBEnemyCharacter;
 class ADBBossCharacter;
 class ADBPlayerCharacter;
+class ADBTrainingDummy;
 class ATargetPoint;
 class ATriggerBox;
 class UBoxComponent;
@@ -24,7 +25,8 @@ enum class EDBEncounterState : uint8
 	Reinforcements,
 	Completed,
 	BossActive,
-	BossIntroduction
+	BossIntroduction,
+	AirReinforcement
 };
 
 USTRUCT(BlueprintType)
@@ -54,6 +56,10 @@ public:
 	}
 
 	FSimpleMulticastDelegate OnStateChanged;
+	const ADBTrainingDummy* GetTrainingDummy() const
+	{
+		return TrainingDummy;
+	}
 	ADBBossCharacter* GetBoss() const
 	{
 		return Boss;
@@ -80,6 +86,11 @@ protected:
 	TObjectPtr<UStaticMeshComponent> ExitGate;
 	UPROPERTY(EditInstanceOnly, Category = "Encounter")
 	TArray<TObjectPtr<ADBEnemyCharacter>> Enemies;
+	UPROPERTY(EditInstanceOnly, Category = "Encounter|Tutorial")
+	TObjectPtr<ADBTrainingDummy> TrainingDummy;
+	/** An optional enemy that drops in before the side shutter opens. */
+	UPROPERTY(EditInstanceOnly, Category = "Encounter|Reinforcements")
+	FDBReinforcementSpawn DropReinforcement;
 	/** Optional end area beyond the exit. Enabled only after combat is cleared. */
 	UPROPERTY(EditInstanceOnly, Category = "Encounter")
 	TObjectPtr<ATriggerBox> FinishArea;
@@ -118,6 +129,7 @@ private:
 	void CheckCleared();
 	void BossDefeated();
 	void StartReinforcements();
+	ADBEnemyCharacter* SpawnReinforcement(const FDBReinforcementSpawn& Spawn, bool bDrop);
 	void BindEnemy(ADBEnemyCharacter* Enemy);
 	void BindPlayer(ADBPlayerCharacter* Player);
 	void StartBossIntroduction();

@@ -25,6 +25,7 @@ public:
 	virtual bool HasStaggerResistance() const;
 	virtual bool CanBeLaunched() const;
 	virtual EDBAttackId SelectAttack(float Distance, bool bCombo);
+	void BeginDropArrival();
 	UBehaviorTree* GetBehaviorTree() const
 	{
 		return BehaviorTree;
@@ -91,4 +92,5 @@ private:
 	double HitStunEndsAt = 0.0;
 	double LandingRecoveryEndsAt = 0.0;
 	bool bRecoverAfterLanding = false;
+	bool bArrivingFromDrop = false;
 };

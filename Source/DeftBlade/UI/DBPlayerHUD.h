@@ -5,6 +5,7 @@
 #include "DBPlayerHUD.generated.h"
 
 class UDBPlayerHUDWidget;
+class UDBCombatComponent;
 class IInputProcessor;
 
 UCLASS()
@@ -13,6 +14,7 @@ class DEFTBLADE_API ADBPlayerHUD : public AHUD
 	GENERATED_BODY()
 public:
 	void PauseGame();
+	bool ShowParryLesson(UDBCombatComponent* Attacker, const FVector& ImpactPoint);
 
 protected:
 	virtual void BeginPlay() override;

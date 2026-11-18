@@ -6,6 +6,7 @@
 #include "Character/DBPlayerCharacter.h"
 #include "Combat/DBHealthComponent.h"
 #include "Combat/DBCombatComponent.h"
+#include "Combat/DBTrainingDummy.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/TargetPoint.h"
@@ -17,6 +18,7 @@
 #include "Camera/CameraComponent.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
+#include "UI/DBPlayerHUD.h"
 
 ADBCombatEncounter::ADBCombatEncounter()
 {
@@ -64,7 +66,7 @@ void ADBCombatEncounter::BeginPlay()
 			BindEnemy(Enemy);
 		}
 	}
-	if (BoundEnemies.IsEmpty() && Reinforcements.IsEmpty())
+	if (BoundEnemies.IsEmpty() && !DropReinforcement.EnemyClass && Reinforcements.IsEmpty())
 	{
 		// A missing assignment must not trap the player in an unwinnable room.
 		SetState(EDBEncounterState::Cleared);
@@ -262,8 +264,9 @@ void ADBCombatEncounter::BossDefeated()
 
 void ADBCombatEncounter::CheckCleared()
 {
-	if ((State != EDBEncounterState::Active && State != EDBEncounterState::Reinforcements) || GateOpenStartedAt >= 0
-	    || IsActorBeingDestroyed() || GetWorld()->bIsTearingDown || !EncounterPlayer.IsValid()
+	if ((State != EDBEncounterState::Active && State != EDBEncounterState::AirReinforcement
+	        && State != EDBEncounterState::Reinforcements)
+	    || GateOpenStartedAt >= 0 || IsActorBeingDestroyed() || GetWorld()->bIsTearingDown || !EncounterPlayer.IsValid()
 	    || EncounterPlayer->FindComponentByClass<UDBHealthComponent>()->IsDead())
 	{
 		return;
@@ -276,7 +279,12 @@ void ADBCombatEncounter::CheckCleared()
 			return;
 		}
 	}
-	if (State == EDBEncounterState::Active && !Reinforcements.IsEmpty())
+	if (State == EDBEncounterState::Active && SpawnReinforcement(DropReinforcement, true))
+	{
+		SetState(EDBEncounterState::AirReinforcement);
+		return;
+	}
+	if (State != EDBEncounterState::Reinforcements && !Reinforcements.IsEmpty())
 	{
 		StartReinforcements();
 		return;
@@ -298,27 +306,48 @@ void ADBCombatEncounter::StartReinforcements()
 	SetActorTickEnabled(true);
 	for (const FDBReinforcementSpawn& Spawn : Reinforcements)
 	{
-		if (!Spawn.EnemyClass || !IsValid(Spawn.SpawnPoint))
+		SpawnReinforcement(Spawn, false);
+	}
+}
+
+ADBEnemyCharacter* ADBCombatEncounter::SpawnReinforcement(const FDBReinforcementSpawn& Spawn, bool bDrop)
+{
+	if (!Spawn.EnemyClass || !IsValid(Spawn.SpawnPoint))
+	{
+		return nullptr;
+	}
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButDontSpawnIfColliding;
+	auto* Enemy = GetWorld()->SpawnActor<ADBEnemyCharacter>(
+	    Spawn.EnemyClass, Spawn.SpawnPoint->GetActorLocation(), Spawn.SpawnPoint->GetActorRotation(), Params);
+	if (!Enemy)
+	{
+		return nullptr;
+	}
+	Enemies.Add(Enemy);
+	BindEnemy(Enemy);
+	if (bDrop)
+	{
+		Enemy->BeginDropArrival();
+	}
+	else if (IsValid(TrainingDummy))
+	{
+		auto* Combat = Enemy->FindComponentByClass<UDBCombatComponent>();
+		const auto* PC = Cast<APlayerController>(EncounterPlayer->GetController());
+		if (const UDBWeaponData* Weapon = Combat->GetWeaponData(); PC && Weapon && Weapon->AttackProtectionMaterial)
 		{
-			continue;
-		}
-		FActorSpawnParameters Params;
-		Params.SpawnCollisionHandlingOverride =
-		    ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButDontSpawnIfColliding;
-		auto* Enemy = GetWorld()->SpawnActor<ADBEnemyCharacter>(
-		    Spawn.EnemyClass, Spawn.SpawnPoint->GetActorLocation(), Spawn.SpawnPoint->GetActorRotation(), Params);
-		if (!Enemy)
-		{
-			continue;
-		}
-		Enemies.Add(Enemy);
-		BindEnemy(Enemy);
-		if (auto* AI = Cast<ADBEnemyAIController>(Enemy->GetController()))
-		{
-			// Combat noise supplies one location snapshot; normal sight must acquire the moving player.
-			AI->RememberAttacker(EncounterPlayer.Get());
+			if (auto* HUD = PC->GetHUD<ADBPlayerHUD>())
+			{
+				Combat->OnTutorialParryContact.BindUObject(HUD, &ADBPlayerHUD::ShowParryLesson);
+			}
 		}
 	}
+	if (auto* AI = Cast<ADBEnemyAIController>(Enemy->GetController()))
+	{
+		// Combat noise supplies one location snapshot; normal sight must acquire the moving player.
+		AI->RememberAttacker(EncounterPlayer.Get());
+	}
+	return Enemy;
 }
 
 void ADBCombatEncounter::Tick(float DeltaSeconds)
@@ -371,7 +400,8 @@ void ADBCombatEncounter::UpdateGates()
 		Gate->SetVisibility(bClosed);
 		Gate->SetCollisionEnabled(bClosed ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
 	};
-	SetGate(EntranceGate, State == EDBEncounterState::Active || State == EDBEncounterState::Reinforcements);
+	SetGate(EntranceGate, State == EDBEncounterState::Active || State == EDBEncounterState::AirReinforcement
+	                          || State == EDBEncounterState::Reinforcements);
 	const bool bCleared = State == EDBEncounterState::Cleared || State == EDBEncounterState::Completed;
 	SetGate(ExitGate, !bCleared);
 	SetGate(ReinforcementGate, !bCleared && (State != EDBEncounterState::Reinforcements || GateOpenStartedAt >= 0));
@@ -403,6 +433,7 @@ void ADBCombatEncounter::EndPlay(const EEndPlayReason::Type Reason)
 		if (IsValid(Enemy))
 		{
 			Enemy->FindComponentByClass<UDBHealthComponent>()->OnDeath.RemoveAll(this);
+			Enemy->FindComponentByClass<UDBCombatComponent>()->OnTutorialParryContact.Unbind();
 			Enemy->OnDestroyed.RemoveDynamic(this, &ThisClass::EnemyDestroyed);
 		}
 	}

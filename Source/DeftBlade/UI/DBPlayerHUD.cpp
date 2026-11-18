@@ -28,8 +28,8 @@ namespace
 		}
 		virtual bool HandleKeyDownEvent(FSlateApplication&, const FKeyEvent& Event) override
 		{
-			Update(Event.GetUserIndex(), Event.GetKey().IsGamepadKey());
-			return false;
+			auto* HUD = Update(Event.GetUserIndex(), Event.GetKey().IsGamepadKey());
+			return HUD && HUD->HandleTutorialInput(Event.GetKey(), Event.IsRepeat());
 		}
 		virtual bool HandleAnalogInputEvent(FSlateApplication&, const FAnalogInputEvent& Event) override
 		{
@@ -41,8 +41,13 @@ namespace
 		}
 		virtual bool HandleMouseButtonDownEvent(FSlateApplication&, const FPointerEvent& Event) override
 		{
-			Update(Event.GetUserIndex(), false);
-			return false;
+			auto* HUD = Update(Event.GetUserIndex(), false);
+			return HUD && HUD->HandleTutorialInput(Event.GetEffectingButton(), false);
+		}
+		virtual bool HandleMouseButtonDoubleClickEvent(FSlateApplication&, const FPointerEvent& Event) override
+		{
+			auto* HUD = Update(Event.GetUserIndex(), false);
+			return HUD && HUD->HandleTutorialInput(Event.GetEffectingButton(), false);
 		}
 		virtual bool HandleMouseMoveEvent(FSlateApplication&, const FPointerEvent& Event) override
 		{
@@ -54,21 +59,24 @@ namespace
 		}
 
 	private:
-		void Update(int32 UserIndex, bool bGamepad)
+		UDBPlayerHUDWidget* Update(int32 UserIndex, bool bGamepad)
 		{
 			UDBPlayerHUDWidget* HUD = Widget.Get();
 			ULocalPlayer* Player = HUD ? HUD->GetOwningLocalPlayer() : nullptr;
 			if (!Player || !HUD->IsInViewport() || !Player->GetSlateUser().IsValid()
 			    || Player->GetSlateUser()->GetUserIndex() != UserIndex)
 			{
-				return;
+				return nullptr;
 			}
 			const bool bViewportFocused = Player->ViewportClient && Player->ViewportClient->Viewport
 			                              && Player->ViewportClient->Viewport->HasFocus();
-			if (bViewportFocused || HUD->HasUserFocusedDescendants(HUD->GetOwningPlayer()))
+			if (bViewportFocused || HUD->HasUserFocus(HUD->GetOwningPlayer())
+			    || HUD->HasUserFocusedDescendants(HUD->GetOwningPlayer()))
 			{
 				HUD->SetUsingGamepad(bGamepad);
+				return HUD;
 			}
+			return nullptr;
 		}
 		TWeakObjectPtr<UDBPlayerHUDWidget> Widget;
 	};
@@ -112,6 +120,11 @@ void ADBPlayerHUD::PauseGame()
 	{
 		PlayerWidget->PauseGame();
 	}
+}
+
+bool ADBPlayerHUD::ShowParryLesson(UDBCombatComponent* Attacker, const FVector& ImpactPoint)
+{
+	return PlayerWidget && PlayerWidget->ShowParryLesson(Attacker, ImpactPoint);
 }
 
 void ADBPlayerHUD::ApplicationActivationChanged(bool bActive)

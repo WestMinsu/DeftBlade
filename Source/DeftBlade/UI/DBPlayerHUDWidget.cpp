@@ -22,6 +22,10 @@
 void UDBPlayerHUDWidget::NativeOnInitialized()
 {
 	Super::NativeOnInitialized();
+	if (TutorialCard)
+	{
+		SetIsFocusable(true);
+	}
 	RetryButton->OnClicked.AddDynamic(this, &ThisClass::Retry);
 	ResumeButton->OnClicked.AddDynamic(this, &ThisClass::ResumeGame);
 	RestartButton->OnClicked.AddDynamic(this, &ThisClass::Retry);
@@ -41,6 +45,11 @@ void UDBPlayerHUDWidget::SetUsingGamepad(bool bGamepad)
 	GamepadRetryHint->SetVisibility(GamepadVisibility);
 	GamepadPauseHint->SetVisibility(GamepadVisibility);
 	SettingsPanel->SetUsingGamepad(bGamepad);
+	if (bUsingGamepad != bGamepad)
+	{
+		bUsingGamepad = bGamepad;
+		RenderTutorial();
+	}
 }
 
 void UDBPlayerHUDWidget::NativeConstruct()
@@ -188,6 +197,7 @@ void UDBPlayerHUDWidget::BindEncounter(ADBCombatEncounter* Encounter)
 
 void UDBPlayerHUDWidget::EncounterChanged()
 {
+	TutorialStageStartedAt = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
 	UpdateBossIntroduction();
 	if (BossPanel)
 	{
@@ -221,6 +231,10 @@ void UDBPlayerHUDWidget::EncounterChanged()
 		case EDBEncounterState::Reinforcements:
 			EncounterText->SetText(
 			    NSLOCTEXT("DeftBlade", "EncounterReinforcements", "REINFORCEMENTS - Defeat the incoming enemies"));
+			break;
+		case EDBEncounterState::AirReinforcement:
+			EncounterText->SetText(
+			    NSLOCTEXT("DeftBlade", "AirReinforcement", "REINFORCEMENT - Defeat the incoming enemy"));
 			break;
 		case EDBEncounterState::Cleared:
 			EncounterText->SetText(EncounterSource->GetBoss()
@@ -397,12 +411,15 @@ void UDBPlayerHUDWidget::ReleaseMenuInput()
 	{
 		return;
 	}
-	const bool bPaused = Screen == EScreen::Pause || Screen == EScreen::Settings;
+	const bool bPaused = Screen == EScreen::Pause || Screen == EScreen::Settings || Screen == EScreen::Tutorial;
 	if (Screen == EScreen::Settings)
 	{
 		SettingsPanel->Save();
 	}
 	Screen = EScreen::Gameplay;
+	TutorialAttacker.Reset();
+	TutorialAttackId = 0;
+	UpdateTutorial();
 	PausePanel->SetVisibility(ESlateVisibility::Collapsed);
 	SettingsPanel->SetVisibility(ESlateVisibility::Collapsed);
 	if (APlayerController* PC = GetOwningPlayer())
@@ -447,7 +464,15 @@ void UDBPlayerHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTi
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
 	UpdateBossIntroduction();
-	if (Screen != EScreen::Gameplay)
+	UpdateTutorial();
+	if (Screen == EScreen::Tutorial)
+	{
+		if (auto* PC = GetOwningPlayer(); PC && !HasUserFocus(PC))
+		{
+			SetUserFocus(PC);
+		}
+	}
+	else if (Screen != EScreen::Gameplay)
 	{
 		APlayerController* PC = GetOwningPlayer();
 		const bool bMenuFocused =

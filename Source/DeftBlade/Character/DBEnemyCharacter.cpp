@@ -79,12 +79,19 @@ EDBAttackId ADBEnemyCharacter::SelectAttack(float, bool bCombo)
 
 bool ADBEnemyCharacter::HasStaggerResistance() const
 {
-	return CombatComponent->HasAttackStaggerResistance();
+	return CombatComponent->HasPendingParryLesson() || CombatComponent->HasAttackStaggerResistance();
 }
 
 bool ADBEnemyCharacter::CanBeLaunched() const
 {
-	return !HealthComponent->IsDead();
+	return !HealthComponent->IsDead() && !CombatComponent->HasPendingParryLesson();
+}
+
+void ADBEnemyCharacter::BeginDropArrival()
+{
+	GetCharacterMovement()->SetMovementMode(MOVE_Falling);
+	bRecoverAfterLanding = true;
+	bArrivingFromDrop = true;
 }
 
 void ADBEnemyCharacter::OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode)
@@ -110,18 +117,20 @@ void ADBEnemyCharacter::OnMovementModeChanged(EMovementMode PreviousMovementMode
 		}
 		if (PreviousMovementMode == MOVE_Falling && bRecoverAfterLanding)
 		{
-			LandingRecoveryEndsAt = GetWorld()->GetTimeSeconds() + LandingRecoveryDuration;
+			const float Duration = bArrivingFromDrop ? 2.0f : LandingRecoveryDuration;
+			LandingRecoveryEndsAt = GetWorld()->GetTimeSeconds() + Duration;
 			GetCharacterMovement()->StopMovementImmediately();
-			if (UAnimInstance* Anim = GetMesh()->GetAnimInstance(); Anim && LandingRecoveryMontage
-			                                                        && LandingRecoveryDuration > 0.0f
-			                                                        && LandingRecoveryMontage->RateScale > 0.0f)
+			if (UAnimInstance* Anim = GetMesh()->GetAnimInstance();
+			    Anim && LandingRecoveryMontage && Duration > 0.0f && LandingRecoveryMontage->RateScale > 0.0f)
 			{
-				const float PlayRate = LandingRecoveryMontage->GetPlayLength()
-				                       / (LandingRecoveryDuration * LandingRecoveryMontage->RateScale);
+				const float PlayRate = bArrivingFromDrop ? 1.0f
+				                                         : LandingRecoveryMontage->GetPlayLength()
+				                                               / (Duration * LandingRecoveryMontage->RateScale);
 				Anim->Montage_Play(LandingRecoveryMontage, PlayRate);
 			}
 		}
 		bRecoverAfterLanding = false;
+		bArrivingFromDrop = false;
 	}
 	if (auto* AI = Cast<ADBEnemyAIController>(GetController()))
 	{
@@ -132,6 +141,11 @@ void ADBEnemyCharacter::OnMovementModeChanged(EMovementMode PreviousMovementMode
 float ADBEnemyCharacter::TakeDamage(
     float Amount, const FDamageEvent& Event, AController* EventInstigator, AActor* Causer)
 {
+	// Preserve the opening swing even if the player lands a lethal hit during the approach.
+	if (CombatComponent->HasPendingParryLesson() && FMath::IsFinite(Amount))
+	{
+		Amount = FMath::Min(Amount, HealthComponent->GetHealth() - 1.0f);
+	}
 	const float Applied = HealthComponent->ApplyDamage(Amount);
 	if (Applied <= 0)
 	{

@@ -17,6 +17,14 @@ class USpringArmComponent;
 class UStaticMeshComponent;
 struct FInputActionValue;
 
+struct FDBTutorialBindings
+{
+	FKey LightAttack;
+	FKey HeavyAttack;
+	FKey Jump;
+	FKey Evade;
+};
+
 /** Input/movement policy lives in C++; the Blueprint child supplies assets. */
 UCLASS()
 class DEFTBLADE_API ADBPlayerCharacter : public ACharacter
@@ -27,6 +35,7 @@ public:
 	ADBPlayerCharacter();
 	/** Release held input/actions for menus and focus loss without restoring airborne budgets. */
 	void ResetGameplayInput();
+	FDBTutorialBindings GetTutorialBindings(bool bGamepad) const;
 	virtual void PawnClientRestart() override;
 	virtual void UnPossessed() override;
 	virtual float TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent, AController* EventInstigator,

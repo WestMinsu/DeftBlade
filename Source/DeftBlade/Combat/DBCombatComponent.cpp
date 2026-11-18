@@ -1,5 +1,6 @@
 #include "Combat/DBCombatComponent.h"
 
+#include "AlphaBlend.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/AnimationPoseData.h"
@@ -9,6 +10,7 @@
 #include "Combat/DBCollisionChannels.h"
 #include "Combat/DBHealthComponent.h"
 #include "Combat/DBTargetingComponent.h"
+#include "Combat/DBTrainingDummy.h"
 #include "Components/AudioComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -1133,7 +1135,7 @@ void UDBCombatComponent::UpdateAttackMovement(float DeltaTime)
 	}
 }
 
-void UDBCombatComponent::TryStartAttack()
+void UDBCombatComponent::TryStartAttack(bool bTutorialParry)
 {
 	ACharacter* Character = CastChecked<ACharacter>(GetOwner());
 	const bool bSwitching = BufferedAction.Input == EDBActionInput::SwitchWeapon;
@@ -1158,7 +1160,21 @@ void UDBCombatComponent::TryStartAttack()
 		StopEvadeMovement(false);
 		FinishAction(ActiveActionId, false);
 	}
-	if (Anim->Montage_Play(Definition->Montage, Definition->PlayRate) <= 0.0f)
+	float StartPosition = 0.0f;
+	float Duration;
+	if (bTutorialParry)
+	{
+		// The incoming weapon is already at contact. Start at the light swing's short final windup.
+		const float Rate = Definition->PlayRate * Definition->Montage->RateScale;
+		StartPosition = FMath::Max(0.0f, Definition->HitWindows[0].Start - 0.045f * Rate);
+		Duration = Anim->Montage_PlayWithBlendIn(Definition->Montage, FAlphaBlendArgs(0.035f), Definition->PlayRate,
+		    EMontagePlayReturnType::MontageLength, StartPosition);
+	}
+	else
+	{
+		Duration = Anim->Montage_Play(Definition->Montage, Definition->PlayRate);
+	}
+	if (Duration <= 0.0f)
 	{
 		BufferedAction = {};
 		return;
@@ -1178,7 +1194,7 @@ void UDBCombatComponent::TryStartAttack()
 	}
 	ActiveHitWindow = INDEX_NONE;
 	AttackMontageInstanceId = Instance->GetInstanceID();
-	PreviousAttackPosition = 0.0f;
+	PreviousAttackPosition = StartPosition;
 	HitActors.Reset();
 	bAttackEndedPending = false;
 	bAttackMovementStarted = false;
@@ -1516,6 +1532,10 @@ void UDBCombatComponent::BonesFinalized()
 	const FTransform CurrentMesh = Character->GetMesh()->GetComponentTransform();
 	const FTransform CurrentWeapon = GetTraceTransform(EDBHitTraceSource::Weapon);
 	TraceAttack(PreviousAttackPosition, Position, CurrentMesh, CurrentWeapon);
+	if (GetWorld()->IsPaused())
+	{
+		return;
+	}
 	if (ActionId == ActiveActionId)
 	{
 		TraceSlamDescent();
@@ -1649,8 +1669,37 @@ bool UDBCombatComponent::TryParry(UDBCombatComponent& Attacker, const FVector& I
 	{
 		return false;
 	}
+	ResolveParry(Attacker, ImpactPoint, ParryDirection);
+	return true;
+}
+
+bool UDBCombatComponent::ParryTutorialAttack(UDBCombatComponent& Attacker, uint64 ActionId, const FVector& ImpactPoint)
+{
+	const auto* Character = CastChecked<ACharacter>(GetOwner());
+	const auto* Health = Character->FindComponentByClass<UDBHealthComponent>();
+	if (!Character->IsPlayerControlled() || !Health || Health->IsDead() || GetWorld()->IsPaused()
+	    || !IsValid(Attacker.GetOwner()) || ActionId == 0 || Attacker.ActiveActionId != ActionId
+	    || !Attacker.HasPendingParryLesson())
+	{
+		return false;
+	}
+	const FVector Direction =
+	    (Attacker.GetOwner()->GetActorLocation() - GetOwner()->GetActorLocation()).GetSafeNormal2D();
+	Attacker.OnTutorialParryContact.Unbind();
+	ResolveParry(Attacker, ImpactPoint, Direction);
+	// The tutorial confirmed this press in UI input mode. Start the authored swing in the same frame as the clash.
+	const EDBAttackId Swing =
+	    Character->GetCharacterMovement()->IsFalling() ? EDBAttackId::AirLight1 : EDBAttackId::Light1;
+	BufferedAction = {++NextRequestId, GetWorld()->GetTimeSeconds(), EDBActionInput::LightAttack, nullptr, Swing};
+	TryStartAttack(true);
+	return true;
+}
+
+void UDBCombatComponent::ResolveParry(
+    UDBCombatComponent& Attacker, const FVector& ImpactPoint, const FVector& Direction)
+{
 	ParryWindowEndsAt = 0.0;
-	GetOwner()->SetActorRotation(ParryDirection.Rotation());
+	GetOwner()->SetActorRotation(Direction.Rotation());
 	StopWeaponPresentation();
 	AttachWeapon(true);
 	HolsterAfter = GetWorld()->GetTimeSeconds() + AutoHolsterDelay;
@@ -1685,7 +1734,6 @@ bool UDBCombatComponent::TryParry(UDBCombatComponent& Attacker, const FVector& I
 		Attacker.ResetCombat();
 	}
 	OnParrySucceeded.Broadcast();
-	return true;
 }
 
 void UDBCombatComponent::UpdateAttackProtectionFeedback()
@@ -1780,7 +1828,7 @@ void UDBCombatComponent::ApplyAttackHit(
     const FHitResult& Hit, const FVector& Direction, const FVector& TraceOrigin, uint64 ActionId)
 {
 	AActor* Target = Hit.GetActor();
-	if (ActiveActionId != ActionId)
+	if (ActiveActionId != ActionId || GetWorld()->IsPaused())
 	{
 		return;
 	}
@@ -1808,6 +1856,20 @@ void UDBCombatComponent::ApplyAttackHit(
 	// One contact attempt per actor/window, even when that target rejects it via i-frames.
 	HitActors.Add(Target);
 	UDBCombatComponent* VictimCombat = Target->FindComponentByClass<UDBCombatComponent>();
+	if (OnTutorialParryContact.IsBound() && VictimCombat && Target->CanBeDamaged() && !VictimCombat->IsInvulnerable())
+	{
+		const auto* Pawn = Cast<APawn>(Target);
+		if (Pawn && Pawn->IsPlayerControlled())
+		{
+			// Freeze a swing that actually reaches the player, before applying either damage or a parry.
+			if (OnTutorialParryContact.Execute(this, Hit.ImpactPoint))
+			{
+				return;
+			}
+			// A missing tutorial UI must never leave a protected enemy that cannot be defeated.
+			OnTutorialParryContact.Unbind();
+		}
+	}
 	if (VictimCombat && VictimCombat->TryParry(*this, Hit.ImpactPoint))
 	{
 		return;
@@ -1854,7 +1916,8 @@ void UDBCombatComponent::ApplyAttackHit(
 			LastHitSound = UGameplayStatics::SpawnSoundAtLocation(this, HitSound, Hit.ImpactPoint);
 		}
 	}
-	if (Applied > 0.0f)
+	const auto* Dummy = Cast<ADBTrainingDummy>(Target);
+	if (Applied > 0.0f && (!Dummy || !Dummy->IsRepeatablePractice()))
 	{
 		OnAttackHit.Broadcast(AttackWeapon, Attack, ActionId, ChainId);
 	}

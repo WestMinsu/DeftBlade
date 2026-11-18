@@ -19,6 +19,14 @@ public:
 	ADBTrainingDummy();
 	virtual float TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent, AController* EventInstigator,
 	    AActor* DamageCauser) override;
+	bool IsRepeatablePractice() const
+	{
+		return bRepeatablePractice;
+	}
+	bool HasPracticeHit() const
+	{
+		return bPracticeHit;
+	}
 
 protected:
 	virtual void BeginPlay() override;
@@ -32,6 +40,8 @@ protected:
 	TObjectPtr<UTextRenderComponent> HealthText;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Training")
 	TObjectPtr<UDBHealthComponent> HealthComponent;
+	UPROPERTY(EditInstanceOnly, Category = "Training")
+	bool bRepeatablePractice = false;
 
 private:
 	void UpdateHealthText(float Current, float Maximum);
@@ -40,4 +50,5 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> BodyMaterial;
 	FTimerHandle FeedbackTimer;
+	bool bPracticeHit = false;
 };
