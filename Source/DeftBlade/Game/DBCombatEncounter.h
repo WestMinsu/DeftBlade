@@ -26,7 +26,8 @@ enum class EDBEncounterState : uint8
 	Completed,
 	BossActive,
 	BossIntroduction,
-	AirReinforcement
+	AirReinforcement,
+	ParryReinforcement
 };
 
 USTRUCT(BlueprintType)
@@ -91,6 +92,9 @@ protected:
 	/** An optional enemy that drops in before the side shutter opens. */
 	UPROPERTY(EditInstanceOnly, Category = "Encounter|Reinforcements")
 	FDBReinforcementSpawn DropReinforcement;
+	/** Optional solo enemy for the parry lesson before the final group. */
+	UPROPERTY(EditInstanceOnly, Category = "Encounter|Reinforcements")
+	FDBReinforcementSpawn ParryReinforcement;
 	/** Optional end area beyond the exit. Enabled only after combat is cleared. */
 	UPROPERTY(EditInstanceOnly, Category = "Encounter")
 	TObjectPtr<ATriggerBox> FinishArea;
@@ -128,7 +132,7 @@ private:
 	void TryStart(AActor* Actor);
 	void CheckCleared();
 	void BossDefeated();
-	void StartReinforcements();
+	void StartReinforcements(EDBEncounterState NewState);
 	ADBEnemyCharacter* SpawnReinforcement(const FDBReinforcementSpawn& Spawn, bool bDrop);
 	void BindEnemy(ADBEnemyCharacter* Enemy);
 	void BindPlayer(ADBPlayerCharacter* Player);

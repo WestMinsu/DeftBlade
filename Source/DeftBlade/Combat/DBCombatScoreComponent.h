@@ -42,6 +42,7 @@ protected:
 	int32 HitPoints = 10;
 	UPROPERTY(EditDefaultsOnly, Category = "Score", meta = (ClampMin = "0", ClampMax = "10000"))
 	int32 VariationBonus = 20;
+	/** Full bonus for a four-hit chain with a fresh finisher. */
 	UPROPERTY(EditDefaultsOnly, Category = "Score", meta = (ClampMin = "0", ClampMax = "10000"))
 	int32 FinishBonus = 80;
 	UPROPERTY(EditDefaultsOnly, Category = "Score", meta = (ClampMin = "0", ClampMax = "10000"))
@@ -64,6 +65,7 @@ private:
 	uint64 LastScoredActionId = 0;
 	uint64 LastChainId = 0;
 	int32 ChainHits = 0;
+	int64 ChainFinishPoints = 0;
 	bool bCurrentAttackHit = false;
 	UPROPERTY(VisibleInstanceOnly, Transient, Category = "Score")
 	int32 Score = 0;

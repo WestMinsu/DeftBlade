@@ -48,6 +48,7 @@ void UDBCombatScoreComponent::AttackHit(
 	if (LastChainId != ChainId)
 	{
 		ChainHits = 0;
+		ChainFinishPoints = 0;
 	}
 	LastChainId = ChainId;
 	bCurrentAttackHit = true;
@@ -72,10 +73,20 @@ void UDBCombatScoreComponent::AttackHit(
 	    ChainHits >= 2
 	    && (bLightFinish || bHeavyFinish || Attack == EDBAttackId::AirLight3 || Attack == EDBAttackId::AirHeavy
 	        || (Definition->NextLight == EDBAttackId::None && Definition->NextHeavy == EDBAttackId::None));
-	const int64 Points = int64(FMath::Max(0, HitPoints)) + (bVaried ? FMath::Max(0, VariationBonus) : 0)
-	                     + (bFinish ? FMath::Max(0, FinishBonus) : 0);
-	Award(Points, bFinish ? (bVaried ? EDBScoreEvent::VariedFinish : EDBScoreEvent::Finish)
-	                      : (bVaried ? EDBScoreEvent::Variation : EDBScoreEvent::Hit));
+	int64 FinishDelta = 0;
+	if (bFinish)
+	{
+		constexpr int32 FinishPercentByLength[] = {25, 50, 100, 150}; // Two, three, four, five or more hits.
+		const int32 Index = FMath::Min<int32>(ChainHits - 2, UE_ARRAY_COUNT(FinishPercentByLength) - 1);
+		const int64 FullFinish = int64(FMath::Max(0, FinishBonus)) * FinishPercentByLength[Index] / 100;
+		const int64 FinishPoints = bVaried ? FullFinish : FullFinish / 4;
+		// Extending a chain after a rewarded finisher only pays the difference.
+		FinishDelta = FMath::Max<int64>(0, FinishPoints - ChainFinishPoints);
+		ChainFinishPoints += FinishDelta;
+	}
+	const int64 Points = int64(FMath::Max(0, HitPoints)) + (bVaried ? FMath::Max(0, VariationBonus) : 0) + FinishDelta;
+	Award(Points, FinishDelta > 0 ? (bVaried ? EDBScoreEvent::VariedFinish : EDBScoreEvent::Finish)
+	                              : (bVaried ? EDBScoreEvent::Variation : EDBScoreEvent::Hit));
 }
 
 void UDBCombatScoreComponent::ParrySucceeded()

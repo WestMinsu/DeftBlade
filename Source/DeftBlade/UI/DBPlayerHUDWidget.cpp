@@ -146,7 +146,7 @@ void UDBPlayerHUDWidget::ScoreChanged(int32 Points, EDBScoreEvent Event)
 			Label = NSLOCTEXT("DeftBlade", "ScoreVariation", "NEW TECHNIQUE");
 			break;
 		case EDBScoreEvent::Finish:
-			Label = NSLOCTEXT("DeftBlade", "ScoreFinish", "CHAIN FINISH");
+			Label = NSLOCTEXT("DeftBlade", "ScoreRepeatFinish", "REPEAT FINISH");
 			break;
 		case EDBScoreEvent::VariedFinish:
 			Label = NSLOCTEXT("DeftBlade", "ScoreVariedFinish", "VARIED FINISH");
@@ -233,6 +233,7 @@ void UDBPlayerHUDWidget::EncounterChanged()
 			    NSLOCTEXT("DeftBlade", "EncounterReinforcements", "REINFORCEMENTS - Defeat the incoming enemies"));
 			break;
 		case EDBEncounterState::AirReinforcement:
+		case EDBEncounterState::ParryReinforcement:
 			EncounterText->SetText(
 			    NSLOCTEXT("DeftBlade", "AirReinforcement", "REINFORCEMENT - Defeat the incoming enemy"));
 			break;

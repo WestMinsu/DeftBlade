@@ -66,7 +66,8 @@ void ADBCombatEncounter::BeginPlay()
 			BindEnemy(Enemy);
 		}
 	}
-	if (BoundEnemies.IsEmpty() && !DropReinforcement.EnemyClass && Reinforcements.IsEmpty())
+	if (BoundEnemies.IsEmpty() && !DropReinforcement.EnemyClass && !ParryReinforcement.EnemyClass
+	    && Reinforcements.IsEmpty())
 	{
 		// A missing assignment must not trap the player in an unwinnable room.
 		SetState(EDBEncounterState::Cleared);
@@ -265,7 +266,7 @@ void ADBCombatEncounter::BossDefeated()
 void ADBCombatEncounter::CheckCleared()
 {
 	if ((State != EDBEncounterState::Active && State != EDBEncounterState::AirReinforcement
-	        && State != EDBEncounterState::Reinforcements)
+	        && State != EDBEncounterState::ParryReinforcement && State != EDBEncounterState::Reinforcements)
 	    || GateOpenStartedAt >= 0 || IsActorBeingDestroyed() || GetWorld()->bIsTearingDown || !EncounterPlayer.IsValid()
 	    || EncounterPlayer->FindComponentByClass<UDBHealthComponent>()->IsDead())
 	{
@@ -284,9 +285,15 @@ void ADBCombatEncounter::CheckCleared()
 		SetState(EDBEncounterState::AirReinforcement);
 		return;
 	}
+	if ((State == EDBEncounterState::Active || State == EDBEncounterState::AirReinforcement)
+	    && ParryReinforcement.EnemyClass && IsValid(ParryReinforcement.SpawnPoint))
+	{
+		StartReinforcements(EDBEncounterState::ParryReinforcement);
+		return;
+	}
 	if (State != EDBEncounterState::Reinforcements && !Reinforcements.IsEmpty())
 	{
-		StartReinforcements();
+		StartReinforcements(EDBEncounterState::Reinforcements);
 		return;
 	}
 	SetState(EDBEncounterState::Cleared);
@@ -298,15 +305,28 @@ void ADBCombatEncounter::BindEnemy(ADBEnemyCharacter* Enemy)
 	Enemy->OnDestroyed.AddDynamic(this, &ThisClass::EnemyDestroyed);
 }
 
-void ADBCombatEncounter::StartReinforcements()
+void ADBCombatEncounter::StartReinforcements(EDBEncounterState NewState)
 {
-	// Keep clear checks closed while the group is being spawned and the entrance opens.
-	GateOpenStartedAt = GetWorld()->GetTimeSeconds();
-	SetState(EDBEncounterState::Reinforcements);
-	SetActorTickEnabled(true);
-	for (const FDBReinforcementSpawn& Spawn : Reinforcements)
+	if (State != EDBEncounterState::ParryReinforcement)
 	{
-		SpawnReinforcement(Spawn, false);
+		GateOpenStartedAt = GetWorld()->GetTimeSeconds();
+		SetActorTickEnabled(true);
+	}
+	SetState(NewState);
+	if (NewState == EDBEncounterState::ParryReinforcement)
+	{
+		SpawnReinforcement(ParryReinforcement, false);
+	}
+	else
+	{
+		for (const FDBReinforcementSpawn& Spawn : Reinforcements)
+		{
+			SpawnReinforcement(Spawn, false);
+		}
+	}
+	if (GateOpenStartedAt < 0)
+	{
+		CheckCleared();
 	}
 }
 
@@ -330,7 +350,8 @@ ADBEnemyCharacter* ADBCombatEncounter::SpawnReinforcement(const FDBReinforcement
 	{
 		Enemy->BeginDropArrival();
 	}
-	else if (IsValid(TrainingDummy))
+	else if (IsValid(TrainingDummy)
+	         && (State == EDBEncounterState::ParryReinforcement || !ParryReinforcement.EnemyClass))
 	{
 		auto* Combat = Enemy->FindComponentByClass<UDBCombatComponent>();
 		const auto* PC = Cast<APlayerController>(EncounterPlayer->GetController());
@@ -400,11 +421,13 @@ void ADBCombatEncounter::UpdateGates()
 		Gate->SetVisibility(bClosed);
 		Gate->SetCollisionEnabled(bClosed ? ECollisionEnabled::QueryAndPhysics : ECollisionEnabled::NoCollision);
 	};
-	SetGate(EntranceGate, State == EDBEncounterState::Active || State == EDBEncounterState::AirReinforcement
-	                          || State == EDBEncounterState::Reinforcements);
+	const bool bReinforcementActive =
+	    State == EDBEncounterState::ParryReinforcement || State == EDBEncounterState::Reinforcements;
+	SetGate(EntranceGate,
+	    State == EDBEncounterState::Active || State == EDBEncounterState::AirReinforcement || bReinforcementActive);
 	const bool bCleared = State == EDBEncounterState::Cleared || State == EDBEncounterState::Completed;
 	SetGate(ExitGate, !bCleared);
-	SetGate(ReinforcementGate, !bCleared && (State != EDBEncounterState::Reinforcements || GateOpenStartedAt >= 0));
+	SetGate(ReinforcementGate, !bCleared && (!bReinforcementActive || GateOpenStartedAt >= 0));
 	SetGate(BossGate, State == EDBEncounterState::BossActive || State == EDBEncounterState::BossIntroduction);
 	if (IsValid(FinishArea))
 	{
