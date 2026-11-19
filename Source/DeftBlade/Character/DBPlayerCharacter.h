@@ -173,6 +173,12 @@ private:
 	void AddMappingContext();
 	void ReleaseMappingContext();
 
+#if !UE_BUILD_SHIPPING
+	void ToggleDebugInvulnerability(FKey, FInputActionValue);
+	void DefeatDebugEnemies(FKey, FInputActionValue);
+	bool bDebugInvulnerable = false;
+#endif
+
 	bool bInitialCameraRotationApplied = false;
 	bool bWalkInputHeld = false;
 	bool bGamepadRunSelected = false;

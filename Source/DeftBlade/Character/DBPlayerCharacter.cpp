@@ -23,6 +23,13 @@
 #include "TimerManager.h"
 #include "UI/DBPlayerHUD.h"
 
+#if !UE_BUILD_SHIPPING
+#include "Character/DBBossCharacter.h"
+#include "Character/DBEnemyCharacter.h"
+#include "Engine/Engine.h"
+#include "EngineUtils.h"
+#endif
+
 DEFINE_LOG_CATEGORY_STATIC(LogDBPlayer, Log, All);
 
 ADBPlayerCharacter::ADBPlayerCharacter()
@@ -114,6 +121,12 @@ FVector ADBPlayerCharacter::GetAttackInputDirection() const
 float ADBPlayerCharacter::TakeDamage(
     float Amount, const FDamageEvent& Event, AController* EventInstigator, AActor* Causer)
 {
+#if !UE_BUILD_SHIPPING
+	if (bDebugInvulnerable)
+	{
+		return 0.0f;
+	}
+#endif
 	const float Applied = HealthComponent->ApplyDamage(Amount);
 	if (Applied > 0.0f)
 	{
@@ -203,6 +216,10 @@ void ADBPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 		UE_LOG(LogDBPlayer, Error, TEXT("%s requires an EnhancedInputComponent."), *GetName());
 		return;
 	}
+#if !UE_BUILD_SHIPPING
+	Input->BindDebugKey(FInputChord(EKeys::F6), IE_Pressed, this, &ThisClass::ToggleDebugInvulnerability, false);
+	Input->BindDebugKey(FInputChord(EKeys::F7), IE_Pressed, this, &ThisClass::DefeatDebugEnemies, false);
+#endif
 	if (!MoveAction || !GamepadMoveAction || !MouseLookAction || !GamepadLookAction || !JumpAction || !WalkAction
 	    || !EvadeAction || !LightAttackAction || !HeavyAttackAction || !LockOnAction || !SwitchTargetAction
 	    || !SwitchWeaponAction || !PauseAction)
@@ -239,6 +256,50 @@ void ADBPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	Input->BindAction(HeavyAttackAction, ETriggerEvent::Started, this, &ThisClass::HeavyAttack);
 	Input->BindAction(PauseAction, ETriggerEvent::Started, this, &ThisClass::PauseGame);
 }
+
+#if !UE_BUILD_SHIPPING
+void ADBPlayerCharacter::ToggleDebugInvulnerability(FKey, FInputActionValue)
+{
+	bDebugInvulnerable = !bDebugInvulnerable;
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(uint64(GetUniqueID()), 3.0f, FColor::Yellow,
+		    bDebugInvulnerable ? TEXT("DEBUG: Invulnerability ON") : TEXT("DEBUG: Invulnerability OFF"));
+	}
+}
+
+void ADBPlayerCharacter::DefeatDebugEnemies(FKey, FInputActionValue)
+{
+	// Death can spawn the next wave. Only process the enemies present when the key was pressed.
+	TArray<TWeakObjectPtr<UDBHealthComponent>> Enemies;
+	for (TActorIterator<ADBEnemyCharacter> It(GetWorld()); It; ++It)
+	{
+		ADBEnemyCharacter* Enemy = *It;
+		if (Enemy->IsA<ADBBossCharacter>() && !Enemy->GetController())
+		{
+			continue;
+		}
+		if (auto* Health = Enemy->FindComponentByClass<UDBHealthComponent>(); Health && !Health->IsDead())
+		{
+			Enemies.Add(Health);
+		}
+	}
+
+	int32 Defeated = 0;
+	for (const auto& Entry : Enemies)
+	{
+		if (auto* Health = Entry.Get(); Health && Health->ApplyDamage(Health->GetHealth()) > 0.0f)
+		{
+			++Defeated;
+		}
+	}
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(
+		    uint64(GetUniqueID()), 3.0f, FColor::Yellow, FString::Printf(TEXT("DEBUG: %d enemies defeated"), Defeated));
+	}
+}
+#endif
 
 void ADBPlayerCharacter::PauseGame()
 {
