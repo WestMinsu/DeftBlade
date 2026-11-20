@@ -30,6 +30,14 @@ enum class EDBEncounterState : uint8
 	ParryReinforcement
 };
 
+enum class EDBTraversalLesson : uint8
+{
+	None,
+	Jump,
+	DoubleJump,
+	EvadeSprint
+};
+
 USTRUCT(BlueprintType)
 struct FDBReinforcementSpawn
 {
@@ -61,6 +69,7 @@ public:
 	{
 		return TrainingDummy;
 	}
+	EDBTraversalLesson GetTraversalLesson(const FVector& Position) const;
 	ADBBossCharacter* GetBoss() const
 	{
 		return Boss;
@@ -89,6 +98,12 @@ protected:
 	TArray<TObjectPtr<ADBEnemyCharacter>> Enemies;
 	UPROPERTY(EditInstanceOnly, Category = "Encounter|Tutorial")
 	TObjectPtr<ADBTrainingDummy> TrainingDummy;
+	UPROPERTY(EditInstanceOnly, Category = "Encounter|Tutorial")
+	TObjectPtr<ATriggerBox> JumpArea;
+	UPROPERTY(EditInstanceOnly, Category = "Encounter|Tutorial")
+	TObjectPtr<ATriggerBox> DoubleJumpArea;
+	UPROPERTY(EditInstanceOnly, Category = "Encounter|Tutorial")
+	TObjectPtr<ATriggerBox> EvadeSprintArea;
 	/** An optional enemy that drops in before the side shutter opens. */
 	UPROPERTY(EditInstanceOnly, Category = "Encounter|Reinforcements")
 	FDBReinforcementSpawn DropReinforcement;

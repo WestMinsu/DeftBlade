@@ -35,6 +35,10 @@ namespace
 		{
 			return FText::FromString(TEXT("Y"));
 		}
+		if (Key == EKeys::Gamepad_RightTrigger || Key == EKeys::Gamepad_RightTriggerAxis)
+		{
+			return NSLOCTEXT("DeftBlade", "TutorialRightTrigger", "RT");
+		}
 		return Key.GetDisplayName(false);
 	}
 }
@@ -66,17 +70,33 @@ void UDBPlayerHUDWidget::UpdateTutorial()
 			switch (EncounterSource->GetState())
 			{
 				case EDBEncounterState::Ready:
-					if (FVector::DistSquared(Dummy->GetActorLocation(), HealthSource->GetOwner()->GetActorLocation())
-					    <= FMath::Square(340.0))
+				{
+					const FVector Position = HealthSource->GetOwner()->GetActorLocation();
+					if (FVector::DistSquared(Dummy->GetActorLocation(), Position) <= FMath::Square(340.0))
 					{
-						bReachedPractice = true;
 						Next = Dummy->HasPracticeHit() ? ETutorialHint::PracticeCombos : ETutorialHint::Practice;
 					}
-					else if (!bReachedPractice)
+					else
 					{
-						Next = ETutorialHint::Movement;
+						switch (EncounterSource->GetTraversalLesson(Position))
+						{
+							case EDBTraversalLesson::Jump:
+								Next = ETutorialHint::Jump;
+								break;
+							case EDBTraversalLesson::DoubleJump:
+								Next = ETutorialHint::DoubleJump;
+								break;
+							case EDBTraversalLesson::EvadeSprint:
+								Next = ETutorialHint::EvadeSprint;
+								break;
+							case EDBTraversalLesson::None:
+								Next = bReachedContextLesson ? ETutorialHint::None : ETutorialHint::Movement;
+								break;
+						}
 					}
+					bReachedContextLesson |= Next != ETutorialHint::None && Next != ETutorialHint::Movement;
 					break;
+				}
 				case EDBEncounterState::Active:
 					Next = StageTime < 7.0 ? ETutorialHint::MixedCombo : ETutorialHint::None;
 					break;
@@ -127,9 +147,30 @@ void UDBPlayerHUDWidget::RenderTutorial()
 	{
 		case ETutorialHint::Movement:
 			Title = NSLOCTEXT("DeftBlade", "TutorialMovementTitle", "MOVEMENT");
-			Body = NSLOCTEXT("DeftBlade", "TutorialMovementBody", "Follow the passage to the practice target.");
+			Body = NSLOCTEXT("DeftBlade", "TutorialMovementBody", "Follow the passage ahead.");
 			Input = bUsingGamepad ? NSLOCTEXT("DeftBlade", "TutorialStick", "LEFT STICK   Move")
 			                      : NSLOCTEXT("DeftBlade", "TutorialWASD", "W A S D   Move");
+			break;
+		case ETutorialHint::Jump:
+			Title = NSLOCTEXT("DeftBlade", "TutorialJumpTitle", "JUMP");
+			Body = NSLOCTEXT("DeftBlade", "TutorialJumpBody", "Move forward and jump onto the low step.");
+			Input = FText::Format(NSLOCTEXT("DeftBlade", "TutorialJumpInput", "{0}   Jump"), PromptKey(Bindings.Jump));
+			break;
+		case ETutorialHint::DoubleJump:
+			Title = NSLOCTEXT("DeftBlade", "TutorialDoubleJumpTitle", "DOUBLE JUMP");
+			Body =
+			    NSLOCTEXT("DeftBlade", "TutorialDoubleJumpBody", "Jump again in the air to reach the higher platform.");
+			Input =
+			    FText::Format(NSLOCTEXT("DeftBlade", "TutorialDoubleJumpInput", "{0}   Jump   →   {0}   Jump again"),
+			        PromptKey(Bindings.Jump));
+			break;
+		case ETutorialHint::EvadeSprint:
+			Title = NSLOCTEXT("DeftBlade", "TutorialEvadeSprintTitle", "DODGE AND SPRINT");
+			Body = NSLOCTEXT(
+			    "DeftBlade", "TutorialEvadeSprintBody", "Move and hold the dodge button to sprint out of the dash.");
+			Input = FText::Format(NSLOCTEXT("DeftBlade", "TutorialEvadeSprintInput",
+			                          "Tap {0}   Dodge     ·     Hold {0} while moving   Sprint"),
+			    PromptKey(Bindings.Evade));
 			break;
 		case ETutorialHint::Practice:
 		case ETutorialHint::PracticeCombos:

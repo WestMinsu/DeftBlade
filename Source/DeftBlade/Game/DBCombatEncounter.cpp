@@ -84,6 +84,29 @@ void ADBCombatEncounter::BeginPlay()
 	}
 }
 
+EDBTraversalLesson ADBCombatEncounter::GetTraversalLesson(const FVector& Position) const
+{
+	const auto IsInside = [&Position](const ATriggerBox* Area)
+	{
+		const auto* Box = IsValid(Area) ? Cast<UBoxComponent>(Area->GetCollisionComponent()) : nullptr;
+		if (!Box)
+		{
+			return false;
+		}
+		const FVector Extent = Box->GetUnscaledBoxExtent();
+		return FBox(-Extent, Extent).IsInsideOrOn(Box->GetComponentTransform().InverseTransformPosition(Position));
+	};
+	if (IsInside(JumpArea))
+	{
+		return EDBTraversalLesson::Jump;
+	}
+	if (IsInside(DoubleJumpArea))
+	{
+		return EDBTraversalLesson::DoubleJump;
+	}
+	return IsInside(EvadeSprintArea) ? EDBTraversalLesson::EvadeSprint : EDBTraversalLesson::None;
+}
+
 void ADBCombatEncounter::Entered(
     UPrimitiveComponent*, AActor* OtherActor, UPrimitiveComponent*, int32, bool, const FHitResult&)
 {

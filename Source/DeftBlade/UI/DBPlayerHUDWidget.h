@@ -147,6 +147,9 @@ private:
 	{
 		None,
 		Movement,
+		Jump,
+		DoubleJump,
+		EvadeSprint,
 		Practice,
 		PracticeCombos,
 		MixedCombo,
@@ -157,7 +160,7 @@ private:
 	double TutorialStageStartedAt = 0.0;
 	double ParryInputAllowedAt = 0.0;
 	bool bParryInputReady = false;
-	bool bReachedPractice = false;
+	bool bReachedContextLesson = false;
 	bool bParryTaught = false;
 	TWeakObjectPtr<UDBCombatComponent> TutorialAttacker;
 	FVector TutorialImpactPoint = FVector::ZeroVector;
