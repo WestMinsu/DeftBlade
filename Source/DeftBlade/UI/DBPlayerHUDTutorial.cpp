@@ -64,10 +64,15 @@ void UDBPlayerHUDWidget::UpdateTutorial()
 	         && EncounterSource.IsValid())
 	{
 		const ADBTrainingDummy* Dummy = EncounterSource->GetTrainingDummy();
-		if (IsValid(Dummy))
+		const EDBEncounterState State = EncounterSource->GetState();
+		if (State == EDBEncounterState::BossIntroduction && EncounterSource->GetBossCheckpoint())
+		{
+			Next = ETutorialHint::Checkpoint;
+		}
+		else if (IsValid(Dummy))
 		{
 			const double StageTime = GetWorld()->GetTimeSeconds() - TutorialStageStartedAt;
-			switch (EncounterSource->GetState())
+			switch (State)
 			{
 				case EDBEncounterState::Ready:
 				{
@@ -124,6 +129,7 @@ void UDBPlayerHUDWidget::RenderTutorial()
 	const auto* Player = Cast<ADBPlayerCharacter>(GetOwningPlayerPawn());
 	const bool bVisible = Player && TutorialHint != ETutorialHint::None;
 	const bool bModal = bVisible && TutorialHint == ETutorialHint::Parry;
+	const bool bCheckpoint = TutorialHint == ETutorialHint::Checkpoint;
 	TutorialShade->SetVisibility(bModal ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 	TutorialCard->SetVisibility(bVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 	if (!bVisible)
@@ -135,7 +141,7 @@ void UDBPlayerHUDWidget::RenderTutorial()
 		CardSlot->SetAnchors(FAnchors(bModal ? 0.5f : 0.0f, 0.94f));
 		CardSlot->SetAlignment(FVector2D(bModal ? 0.5f : 0.0f, 1.0f));
 		CardSlot->SetPosition(FVector2D(bModal ? 0.0f : 44.0f, 0.0f));
-		CardSlot->SetSize(bModal ? FVector2D(760, 194) : FVector2D(640, 150));
+		CardSlot->SetSize(bModal ? FVector2D(760, 194) : bCheckpoint ? FVector2D(240, 54) : FVector2D(640, 150));
 	}
 	const FDBTutorialBindings Bindings = Player->GetTutorialBindings(bUsingGamepad);
 	const FText Light = PromptKey(Bindings.LightAttack);
@@ -193,10 +199,13 @@ void UDBPlayerHUDWidget::RenderTutorial()
 		case ETutorialHint::AirCombo:
 			Title = NSLOCTEXT("DeftBlade", "TutorialAirTitle", "AIR COMBO");
 			Body = NSLOCTEXT("DeftBlade", "TutorialAirBody",
-			    "Launch the enemy after it lands. Follow it up and finish with a slam.");
+			    "Launch the enemy, follow up with air attacks, then finish with a slam.");
 			Input = FText::Format(NSLOCTEXT("DeftBlade", "TutorialAirInput",
 			                          "{0} + {1}   Launch   →   {2} ×3   Air combo   →   {1}   Slam"),
 			    PromptKey(Bindings.Jump), Heavy, Light);
+			break;
+		case ETutorialHint::Checkpoint:
+			Title = NSLOCTEXT("DeftBlade", "CheckpointSavedTitle", "CHECKPOINT SAVED");
 			break;
 		case ETutorialHint::Parry:
 			Title = NSLOCTEXT("DeftBlade", "TutorialParryTitle", "PARRY THE STRIKE");
@@ -216,6 +225,9 @@ void UDBPlayerHUDWidget::RenderTutorial()
 	TutorialTitle->SetText(Title);
 	TutorialBody->SetText(Body);
 	TutorialInput->SetText(Input);
+	const ESlateVisibility Details = bCheckpoint ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible;
+	TutorialBody->SetVisibility(Details);
+	TutorialInput->SetVisibility(Details);
 	TutorialInput->SetRenderOpacity(!bModal || bParryInputReady ? 1.0f : 0.55f);
 }
 

@@ -8,4 +8,9 @@ UCLASS()
 class DEFTBLADE_API ADBGameMode : public AGameModeBase
 {
 	GENERATED_BODY()
+
+public:
+	static constexpr TCHAR BossCheckpointOption[] = TEXT("DBBossCheckpointScore");
+
+	virtual void RestartPlayer(AController* NewPlayer) override;
 };

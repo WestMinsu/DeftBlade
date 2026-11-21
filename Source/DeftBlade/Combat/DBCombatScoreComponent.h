@@ -32,6 +32,7 @@ public:
 	{
 		return Score;
 	}
+	void RestoreCheckpointScore(int32 CheckpointScore);
 	FDBScoreChanged OnScoreChanged;
 
 protected:

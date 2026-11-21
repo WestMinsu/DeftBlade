@@ -154,6 +154,7 @@ private:
 		PracticeCombos,
 		MixedCombo,
 		AirCombo,
+		Checkpoint,
 		Parry
 	};
 	ETutorialHint TutorialHint = ETutorialHint::None;

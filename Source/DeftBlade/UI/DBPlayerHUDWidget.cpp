@@ -13,6 +13,7 @@
 #include "Components/TextBlock.h"
 #include "GameFramework/PlayerController.h"
 #include "Game/DBCombatEncounter.h"
+#include "Game/DBGameMode.h"
 #include "Character/DBBossCharacter.h"
 #include "Character/DBPlayerCharacter.h"
 #include "Input/Events.h"
@@ -450,8 +451,16 @@ void UDBPlayerHUDWidget::Retry()
 	bRetryRequested = true;
 	RetryButton->SetIsEnabled(false);
 	RestartButton->SetIsEnabled(false);
+	FString Options;
+	if (Screen == EScreen::Result && HealthSource->IsDead() && EncounterSource.IsValid())
+	{
+		if (const int32 Score = EncounterSource->GetBossRetryScore(); Score >= 0)
+		{
+			Options = FString::Printf(TEXT("%s=%d"), ADBGameMode::BossCheckpointOption, Score);
+		}
+	}
 	ReleaseMenuInput();
-	UGameplayStatics::OpenLevel(this, FName(*UGameplayStatics::GetCurrentLevelName(this, true)));
+	UGameplayStatics::OpenLevel(this, FName(*UGameplayStatics::GetCurrentLevelName(this, true)), true, Options);
 }
 
 void UDBPlayerHUDWidget::NativeDestruct()

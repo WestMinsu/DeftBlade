@@ -4,6 +4,12 @@
 #include "Combat/DBHealthComponent.h"
 #include "GameFramework/Actor.h"
 
+void UDBCombatScoreComponent::RestoreCheckpointScore(int32 CheckpointScore)
+{
+	Score = FMath::Max(0, CheckpointScore);
+	OnScoreChanged.Broadcast(0, EDBScoreEvent::Hit);
+}
+
 void UDBCombatScoreComponent::BeginPlay()
 {
 	Super::BeginPlay();

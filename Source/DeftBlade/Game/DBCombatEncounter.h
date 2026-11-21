@@ -74,6 +74,9 @@ public:
 	{
 		return Boss;
 	}
+	ATargetPoint* GetBossCheckpoint() const;
+	int32 GetBossRetryScore() const;
+	void RestoreBossCheckpoint(ADBPlayerCharacter* Player, int32 Score);
 	float GetBossIntroductionProgress() const;
 	const FText& GetBossIntroductionName() const
 	{
@@ -116,6 +119,10 @@ protected:
 	/** When assigned, FinishArea starts the final fight instead of completing the run. */
 	UPROPERTY(EditInstanceOnly, Category = "Encounter|Boss")
 	TObjectPtr<ADBBossCharacter> Boss;
+	UPROPERTY(EditInstanceOnly, Category = "Encounter|Boss")
+	TObjectPtr<ATargetPoint> BossCheckpoint;
+	UPROPERTY(EditInstanceOnly, Category = "Encounter|Boss")
+	TObjectPtr<AActor> BossCheckpointIndicator;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Encounter|Boss")
 	TObjectPtr<UStaticMeshComponent> BossGate;
 	UPROPERTY(EditAnywhere, Category = "Encounter|Boss|Introduction")
@@ -154,6 +161,7 @@ private:
 	void StartBossIntroduction();
 	void UpdateBossIntroduction();
 	void FinishBossIntroduction(bool bStartFight);
+	void StartBossFight();
 	void PlayerDied();
 	void SetState(EDBEncounterState NewState);
 	void UpdateGates();
@@ -162,6 +170,8 @@ private:
 	double GateOpenStartedAt = -1;
 	double BossIntroductionStartedAt = -1;
 	bool bReturningFromIntroduction = false;
+	bool bRestoredBossCheckpoint = false;
+	int32 BossCheckpointScore = 0;
 	TWeakObjectPtr<APlayerController> IntroductionController;
 	TWeakObjectPtr<AActor> PreviousViewTarget;
 	UPROPERTY(Transient)

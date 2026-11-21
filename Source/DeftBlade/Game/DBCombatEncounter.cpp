@@ -6,6 +6,7 @@
 #include "Character/DBPlayerCharacter.h"
 #include "Combat/DBHealthComponent.h"
 #include "Combat/DBCombatComponent.h"
+#include "Combat/DBCombatScoreComponent.h"
 #include "Combat/DBTrainingDummy.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -57,6 +58,11 @@ void ADBCombatEncounter::BeginPlay()
 		FinishArea->SetActorEnableCollision(false);
 		FinishArea->OnActorBeginOverlap.AddDynamic(this, &ThisClass::FinishEntered);
 	}
+	if (bRestoredBossCheckpoint)
+	{
+		UpdateGates();
+		return;
+	}
 	TSet<ADBEnemyCharacter*> BoundEnemies;
 	for (ADBEnemyCharacter* Enemy : Enemies)
 	{
@@ -82,6 +88,42 @@ void ADBCombatEncounter::BeginPlay()
 	{
 		TryStart(Player);
 	}
+}
+
+ATargetPoint* ADBCombatEncounter::GetBossCheckpoint() const
+{
+	return IsValid(Boss) && IsValid(FinishArea) && IsValid(BossCheckpoint) ? BossCheckpoint.Get() : nullptr;
+}
+
+int32 ADBCombatEncounter::GetBossRetryScore() const
+{
+	if (!GetBossCheckpoint())
+	{
+		return INDEX_NONE;
+	}
+	if (State == EDBEncounterState::Cleared && EncounterPlayer.IsValid())
+	{
+		return EncounterPlayer->FindComponentByClass<UDBCombatScoreComponent>()->GetScore();
+	}
+	return State == EDBEncounterState::BossActive || State == EDBEncounterState::BossIntroduction ? BossCheckpointScore
+	                                                                                              : INDEX_NONE;
+}
+
+void ADBCombatEncounter::RestoreBossCheckpoint(ADBPlayerCharacter* Player, int32 Score)
+{
+	BindPlayer(Player);
+	bRestoredBossCheckpoint = true;
+	Player->FindComponentByClass<UDBCombatScoreComponent>()->RestoreCheckpointScore(Score);
+	EntryTrigger->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	for (ADBEnemyCharacter* Enemy : Enemies)
+	{
+		if (IsValid(Enemy) && Enemy != Boss.Get())
+		{
+			Enemy->Destroy();
+		}
+	}
+	Enemies.Reset();
+	SetState(EDBEncounterState::Cleared);
 }
 
 EDBTraversalLesson ADBCombatEncounter::GetTraversalLesson(const FVector& Position) const
@@ -146,7 +188,15 @@ void ADBCombatEncounter::FinishEntered(AActor*, AActor* OtherActor)
 	Player->GetCharacterMovement()->StopMovementImmediately();
 	if (IsValid(Boss) && !Boss->FindComponentByClass<UDBHealthComponent>()->IsDead())
 	{
-		StartBossIntroduction();
+		BossCheckpointScore = Player->FindComponentByClass<UDBCombatScoreComponent>()->GetScore();
+		if (bRestoredBossCheckpoint)
+		{
+			StartBossFight();
+		}
+		else
+		{
+			StartBossIntroduction();
+		}
 		return;
 	}
 	SetState(EDBEncounterState::Completed);
@@ -267,9 +317,14 @@ void ADBCombatEncounter::FinishBossIntroduction(bool bStartFight)
 	SetActorTickEnabled(false);
 	if (bStartFight && IsValid(Boss) && EncounterPlayer.IsValid())
 	{
-		SetState(EDBEncounterState::BossActive);
-		Boss->Activate(EncounterPlayer.Get());
+		StartBossFight();
 	}
+}
+
+void ADBCombatEncounter::StartBossFight()
+{
+	SetState(EDBEncounterState::BossActive);
+	Boss->Activate(EncounterPlayer.Get());
 }
 
 void ADBCombatEncounter::BossDefeated()
@@ -452,6 +507,10 @@ void ADBCombatEncounter::UpdateGates()
 	SetGate(ExitGate, !bCleared);
 	SetGate(ReinforcementGate, !bCleared && (!bReinforcementActive || GateOpenStartedAt >= 0));
 	SetGate(BossGate, State == EDBEncounterState::BossActive || State == EDBEncounterState::BossIntroduction);
+	if (IsValid(BossCheckpointIndicator))
+	{
+		BossCheckpointIndicator->SetActorHiddenInGame(State != EDBEncounterState::Cleared);
+	}
 	if (IsValid(FinishArea))
 	{
 		FinishArea->SetActorEnableCollision(State == EDBEncounterState::Cleared);
