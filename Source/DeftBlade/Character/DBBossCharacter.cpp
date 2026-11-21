@@ -13,6 +13,7 @@ ADBBossCharacter::ADBBossCharacter()
 	AutoPossessAI = EAutoPossessAI::Disabled;
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = false;
+	GetCharacterMovement()->RotationRate.Yaw = 210.0;
 	for (FName Name : {TEXT("Torso"), TEXT("Legs"), TEXT("Gauntlets"), TEXT("Boots"), TEXT("Helmet")})
 	{
 		auto* Part = CreateDefaultSubobject<USkeletalMeshComponent>(Name);
@@ -20,6 +21,25 @@ ADBBossCharacter::ADBBossCharacter()
 		Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Armour.Add(Part);
 	}
+}
+
+void ADBBossCharacter::TurnTowards(const FVector& Direction, float DeltaSeconds)
+{
+	if (Direction.IsNearlyZero())
+	{
+		return;
+	}
+
+	const double Yaw = GetActorRotation().Yaw;
+	const double Error = FMath::FindDeltaAngleDegrees(Yaw, Direction.Rotation().Yaw);
+	if (FMath::Abs(Error) < 1.0)
+	{
+		return;
+	}
+	const double MaxStep = GetCharacterMovement()->RotationRate.Yaw * DeltaSeconds;
+	// Ease into alignment while limiting how fast a large turn can rotate the grounded body.
+	const double Step = FMath::Clamp(Error * (1.0 - FMath::Exp(-8.0 * DeltaSeconds)), -MaxStep, MaxStep);
+	SetActorRotation(FRotator(0.0, Yaw + Step, 0.0));
 }
 
 void ADBBossCharacter::SharePose()

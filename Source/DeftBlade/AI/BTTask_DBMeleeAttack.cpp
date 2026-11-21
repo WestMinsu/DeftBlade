@@ -4,6 +4,7 @@
 #include "Animation/AnimMontage.h"
 #include "BehaviorTree/BehaviorTreeComponent.h"
 #include "BehaviorTree/BlackboardComponent.h"
+#include "Character/DBBossCharacter.h"
 #include "Character/DBEnemyCharacter.h"
 #include "Combat/DBCombatComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -76,14 +77,19 @@ void UBTTask_DBMeleeAttack::TickTask(UBehaviorTreeComponent& OwnerComp, uint8*, 
 			FinishLatentTask(OwnerComp, EBTNodeResult::Failed);
 			return;
 		}
-		TurnTowardsTarget();
+		const bool bBoss = Enemy->IsA<ADBBossCharacter>();
+		if (!bBoss)
+		{
+			TurnTowardsTarget();
+		}
 		if (!AI->CanStartAttack())
 		{
 			// Waiting for an ally is not a failed aim and must not restart this agent's cooldown.
 			AimStartedAt = Enemy->GetWorld()->GetTimeSeconds();
 			return;
 		}
-		if (Enemy->GetWorld()->GetTimeSeconds() - AimStartedAt > 0.75)
+		const double AimTimeLimit = bBoss ? 1.10 : 0.75;
+		if (Enemy->GetWorld()->GetTimeSeconds() - AimStartedAt > AimTimeLimit)
 		{
 			FinishLatentTask(OwnerComp, EBTNodeResult::Failed);
 			return;

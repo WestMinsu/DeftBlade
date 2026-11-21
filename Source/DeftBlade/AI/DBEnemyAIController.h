@@ -6,6 +6,7 @@
 #include "DBEnemyAIController.generated.h"
 
 class UAISenseConfig_Sight;
+class UPathFollowingComponent;
 
 namespace DBEnemyBB
 {
@@ -54,6 +55,7 @@ private:
 	UFUNCTION()
 	void PerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
 	void ForgetTarget();
+	void LimitBossMovementWhileTurning(UPathFollowingComponent* PathFollowing, FVector& MoveInput);
 	bool HasCommittedAttack() const;
 	void UpdateClosePressure();
 	FVector GetCombatLocation(const FVector& GroundTarget) const;

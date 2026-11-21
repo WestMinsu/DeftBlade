@@ -11,6 +11,7 @@ class DEFTBLADE_API ADBBossCharacter : public ADBEnemyCharacter
 public:
 	ADBBossCharacter();
 	void Activate(APawn* Player);
+	void TurnTowards(const FVector& Direction, float DeltaSeconds);
 	virtual bool CanAct() const override;
 	virtual bool HasStaggerResistance() const override;
 	virtual bool CanBeLaunched() const override;

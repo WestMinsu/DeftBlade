@@ -4,6 +4,7 @@
 #include "Animation/AnimMontage.h"
 #include "BehaviorTree/BlackboardComponent.h"
 #include "BrainComponent.h"
+#include "Character/DBBossCharacter.h"
 #include "Character/DBEnemyCharacter.h"
 #include "Character/DBPlayerCharacter.h"
 #include "Combat/DBCombatComponent.h"
@@ -53,6 +54,10 @@ void ADBEnemyAIController::OnPossess(APawn* InPawn)
 	Super::OnPossess(InPawn);
 	GetPerceptionComponent()->SetSenseEnabled(SightConfig->GetSenseImplementation(), true);
 	GetPerceptionComponent()->OnTargetPerceptionUpdated.AddUniqueDynamic(this, &ThisClass::PerceptionUpdated);
+	if (InPawn->IsA<ADBBossCharacter>())
+	{
+		GetPathFollowingComponent()->PostProcessMove.BindUObject(this, &ThisClass::LimitBossMovementWhileTurning);
+	}
 	if (const auto* Enemy = Cast<ADBEnemyCharacter>(InPawn); Enemy && Enemy->GetBehaviorTree())
 	{
 		RunBehaviorTree(Enemy->GetBehaviorTree());
@@ -84,6 +89,15 @@ void ADBEnemyAIController::Tick(float DeltaSeconds)
 	const auto* Combat = Enemy ? Enemy->FindComponentByClass<UDBCombatComponent>() : nullptr;
 	const bool bCanFaceTarget = TrackedTarget.IsValid() && Blackboard && Enemy && Enemy->CanAct() && Combat
 	                            && Combat->GetActionState() == EDBActionState::None;
+	if (auto* Boss = Cast<ADBBossCharacter>(Enemy); Boss && bCanFaceTarget && bHasSight)
+	{
+		Boss->GetCharacterMovement()->bOrientRotationToMovement = false;
+		// Keep the same facing update during pursuit, braking and pre-attack aim.
+		const FVector Direction = TrackedTarget->GetActorLocation() - Boss->GetActorLocation();
+		Boss->TurnTowards(Direction.GetSafeNormal2D(), DeltaSeconds);
+		return;
+	}
+
 	bool bBackingAway = false;
 	if (bCanFaceTarget && bHasSight && !Blackboard->GetValueAsBool(DBEnemyBB::CanAttack))
 	{
@@ -107,6 +121,23 @@ void ADBEnemyAIController::Tick(float DeltaSeconds)
 	{
 		const FRotator Facing(0, (LastSeenLocation - Enemy->GetActorLocation()).Rotation().Yaw, 0);
 		Enemy->SetActorRotation(FMath::RInterpConstantTo(Enemy->GetActorRotation(), Facing, DeltaSeconds, 180.f));
+	}
+}
+
+void ADBEnemyAIController::LimitBossMovementWhileTurning(UPathFollowingComponent*, FVector& MoveInput)
+{
+	const auto* Boss = Cast<ADBBossCharacter>(GetPawn());
+	if (!Boss || !Boss->CanAct() || !bHasSight || !TrackedTarget.IsValid())
+	{
+		return;
+	}
+
+	const FVector TowardsTarget = (TrackedTarget->GetActorLocation() - Boss->GetActorLocation()).GetSafeNormal2D();
+	if (!TowardsTarget.IsNearlyZero())
+	{
+		const double Alignment = FVector::DotProduct(Boss->GetActorForwardVector(), TowardsTarget);
+		// Reduce path acceleration input from 45 to 100 degrees of yaw error, then keep a slow step.
+		MoveInput *= FMath::GetMappedRangeValueClamped(FVector2D(-0.174, 0.707), FVector2D(0.20, 1.0), Alignment);
 	}
 }
 
@@ -474,6 +505,11 @@ void ADBEnemyAIController::StopBehavior()
 void ADBEnemyAIController::OnUnPossess()
 {
 	StopBehavior();
+	auto& PostProcessMove = GetPathFollowingComponent()->PostProcessMove;
+	if (PostProcessMove.IsBoundToObject(this))
+	{
+		PostProcessMove.Unbind();
+	}
 	GetPerceptionComponent()->OnTargetPerceptionUpdated.RemoveAll(this);
 	NextAttackAt = 0;
 	Super::OnUnPossess();
