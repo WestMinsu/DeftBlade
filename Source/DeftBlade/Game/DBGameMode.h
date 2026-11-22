@@ -11,6 +11,8 @@ class DEFTBLADE_API ADBGameMode : public AGameModeBase
 
 public:
 	static constexpr TCHAR BossCheckpointOption[] = TEXT("DBBossCheckpointScore");
+	static constexpr TCHAR TitleMapPath[] = TEXT("/Game/DeftBlade/Maps/L_Title");
 
+	static bool IsTitleMap(const UObject* WorldContext);
 	virtual void RestartPlayer(AController* NewPlayer) override;
 };

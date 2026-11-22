@@ -5,9 +5,20 @@
 #include "EngineUtils.h"
 #include "Game/DBCombatEncounter.h"
 #include "Kismet/GameplayStatics.h"
+#include "Misc/PackageName.h"
+
+bool ADBGameMode::IsTitleMap(const UObject* WorldContext)
+{
+	return UGameplayStatics::GetCurrentLevelName(WorldContext) == FPackageName::GetShortName(TitleMapPath);
+}
 
 void ADBGameMode::RestartPlayer(AController* NewPlayer)
 {
+	if (IsTitleMap(this))
+	{
+		return;
+	}
+
 	const int32 CheckpointScore = UGameplayStatics::GetIntOption(OptionsString, BossCheckpointOption, INDEX_NONE);
 	if (NewPlayer && !NewPlayer->GetPawn() && CheckpointScore >= 0)
 	{

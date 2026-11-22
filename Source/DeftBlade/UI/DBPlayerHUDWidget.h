@@ -22,6 +22,7 @@ class DEFTBLADE_API UDBPlayerHUDWidget : public UUserWidget
 {
 	GENERATED_BODY()
 public:
+	void ShowTitle();
 	void BindHealth(UDBHealthComponent* Health);
 	void BindEncounter(ADBCombatEncounter* Encounter);
 	void PauseGame();
@@ -94,6 +95,14 @@ protected:
 	TObjectPtr<UButton> RestartButton;
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UButton> SettingsButton;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> PauseReturnButton;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> PauseQuitButton;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> ResultReturnButton;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> ResultQuitButton;
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UDBSettingsWidget> SettingsPanel;
 	UPROPERTY(meta = (BindWidget))
@@ -105,7 +114,31 @@ protected:
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UWidget> GamepadPauseHint;
 
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UWidget> TitlePanel;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UWidget> TitleMenu;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> StartGameButton;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> TitleSettingsButton;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UButton> QuitGameButton;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UWidget> TitleKeyboardHint;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UWidget> TitleGamepadHint;
+	UPROPERTY(EditDefaultsOnly, Category = "Title")
+	TSoftObjectPtr<UWorld> TitleStartMap;
+
 private:
+	void UpdateTitleSelection();
+	UFUNCTION()
+	void StartGame();
+	UFUNCTION()
+	void QuitGame();
+	UFUNCTION()
+	void ReturnToTitle();
 	void HealthChanged(float Current, float Maximum);
 	void ScoreChanged(int32 Points, EDBScoreEvent Event);
 	void EncounterChanged();
@@ -133,6 +166,7 @@ private:
 	float PreviousHealth = 0;
 	enum class EScreen : uint8
 	{
+		Title,
 		Gameplay,
 		Pause,
 		Settings,
@@ -140,7 +174,7 @@ private:
 		Tutorial
 	};
 	EScreen Screen = EScreen::Gameplay;
-	bool bRetryRequested = false;
+	bool bLevelTravelRequested = false;
 	bool bUsingGamepad = false;
 
 	enum class ETutorialHint : uint8

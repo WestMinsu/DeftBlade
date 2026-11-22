@@ -3,6 +3,7 @@
 #include "Combat/DBHealthComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "Game/DBCombatEncounter.h"
+#include "Game/DBGameMode.h"
 #include "Game/DBGameUserSettings.h"
 #include "EngineUtils.h"
 #include "Engine/GameViewportClient.h"
@@ -112,6 +113,10 @@ void ADBPlayerHUD::BeginPlay()
 	FSlateApplication::Get().OnApplicationActivationStateChanged().AddUObject(
 	    this, &ThisClass::ApplicationActivationChanged);
 	PawnChanged(nullptr, PC->GetPawn());
+	if (ADBGameMode::IsTitleMap(this))
+	{
+		PlayerWidget->ShowTitle();
+	}
 }
 
 void ADBPlayerHUD::PauseGame()

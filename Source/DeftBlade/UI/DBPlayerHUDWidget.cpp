@@ -32,6 +32,27 @@ void UDBPlayerHUDWidget::NativeOnInitialized()
 	RestartButton->OnClicked.AddDynamic(this, &ThisClass::Retry);
 	SettingsButton->OnClicked.AddDynamic(this, &ThisClass::OpenSettings);
 	SettingsPanel->OnBackRequested.BindUObject(this, &ThisClass::CloseSettings);
+	for (UButton* Button : {PauseReturnButton.Get(), ResultReturnButton.Get()})
+	{
+		if (Button)
+		{
+			Button->OnClicked.AddDynamic(this, &ThisClass::ReturnToTitle);
+		}
+	}
+	for (UButton* Button : {PauseQuitButton.Get(), ResultQuitButton.Get()})
+	{
+		if (Button)
+		{
+			Button->OnClicked.AddDynamic(this, &ThisClass::QuitGame);
+		}
+	}
+	if (TitlePanel && TitleMenu && StartGameButton && TitleSettingsButton && QuitGameButton)
+	{
+		TitlePanel->SetVisibility(ESlateVisibility::Collapsed);
+		StartGameButton->OnClicked.AddDynamic(this, &ThisClass::StartGame);
+		TitleSettingsButton->OnClicked.AddDynamic(this, &ThisClass::OpenSettings);
+		QuitGameButton->OnClicked.AddDynamic(this, &ThisClass::QuitGame);
+	}
 	SetUsingGamepad(false);
 }
 
@@ -45,6 +66,11 @@ void UDBPlayerHUDWidget::SetUsingGamepad(bool bGamepad)
 	PauseHint->SetVisibility(KeyboardVisibility);
 	GamepadRetryHint->SetVisibility(GamepadVisibility);
 	GamepadPauseHint->SetVisibility(GamepadVisibility);
+	if (TitleKeyboardHint && TitleGamepadHint)
+	{
+		TitleKeyboardHint->SetVisibility(KeyboardVisibility);
+		TitleGamepadHint->SetVisibility(GamepadVisibility);
+	}
 	SettingsPanel->SetUsingGamepad(bGamepad);
 	if (bUsingGamepad != bGamepad)
 	{
@@ -72,7 +98,7 @@ void UDBPlayerHUDWidget::BindHealth(UDBHealthComponent* Health)
 		HealthSource->OnDeath.RemoveAll(this);
 	}
 	ReleaseMenuInput();
-	bRetryRequested = false;
+	bLevelTravelRequested = false;
 	StopAnimation(DamageFlashAnimation);
 	DamageFlash->SetRenderOpacity(0);
 	ResultPanel->SetVisibility(ESlateVisibility::Collapsed);
@@ -361,9 +387,13 @@ void UDBPlayerHUDWidget::ResumeGame()
 
 void UDBPlayerHUDWidget::OpenSettings()
 {
-	if (Screen != EScreen::Pause)
+	if (Screen != EScreen::Pause && Screen != EScreen::Title)
 	{
 		return;
+	}
+	if (Screen == EScreen::Title)
+	{
+		TitleMenu->SetVisibility(ESlateVisibility::Collapsed);
 	}
 	Screen = EScreen::Settings;
 	PausePanel->SetVisibility(ESlateVisibility::Collapsed);
@@ -380,6 +410,13 @@ void UDBPlayerHUDWidget::CloseSettings()
 	}
 	SettingsPanel->Save();
 	SettingsPanel->SetVisibility(ESlateVisibility::Collapsed);
+	if (TitlePanel && TitlePanel->IsVisible())
+	{
+		Screen = EScreen::Title;
+		TitleMenu->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		TitleSettingsButton->SetUserFocus(GetOwningPlayer());
+		return;
+	}
 	Screen = EScreen::Pause;
 	PausePanel->SetVisibility(ESlateVisibility::Visible);
 	SettingsButton->SetUserFocus(GetOwningPlayer());
@@ -443,12 +480,12 @@ void UDBPlayerHUDWidget::ReleaseMenuInput()
 void UDBPlayerHUDWidget::Retry()
 {
 	const bool bCompleted = EncounterSource.IsValid() && EncounterSource->GetState() == EDBEncounterState::Completed;
-	if (bRetryRequested || !HealthSource.IsValid()
+	if (bLevelTravelRequested || !HealthSource.IsValid()
 	    || (Screen != EScreen::Pause && !HealthSource->IsDead() && !bCompleted))
 	{
 		return;
 	}
-	bRetryRequested = true;
+	bLevelTravelRequested = true;
 	RetryButton->SetIsEnabled(false);
 	RestartButton->SetIsEnabled(false);
 	FString Options;
@@ -473,6 +510,11 @@ void UDBPlayerHUDWidget::NativeDestruct()
 void UDBPlayerHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
 	Super::NativeTick(MyGeometry, InDeltaTime);
+	if (Screen == EScreen::Title)
+	{
+		UpdateTitleSelection();
+		return;
+	}
 	UpdateBossIntroduction();
 	UpdateTutorial();
 	if (Screen == EScreen::Tutorial)
@@ -484,29 +526,40 @@ void UDBPlayerHUDWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTi
 	}
 	else if (Screen != EScreen::Gameplay)
 	{
-		APlayerController* PC = GetOwningPlayer();
-		const bool bMenuFocused =
-		    Screen == EScreen::Settings ? SettingsPanel->HasUserFocusedDescendants(PC)
-		    : Screen == EScreen::Pause
-		        ? ResumeButton->HasUserFocus(PC) || RestartButton->HasUserFocus(PC) || SettingsButton->HasUserFocus(PC)
-		        : RetryButton->HasUserFocus(PC);
-		// Opening the panel or clicking its background can leave Slate without a focused button.
-		if (PC && !bMenuFocused)
+		if (APlayerController* PC = GetOwningPlayer())
 		{
 			if (Screen == EScreen::Settings)
 			{
-				SettingsPanel->FocusFirstControl();
+				if (!SettingsPanel->HasUserFocusedDescendants(PC))
+				{
+					SettingsPanel->FocusFirstControl();
+				}
 			}
 			else
 			{
-				(Screen == EScreen::Pause ? ResumeButton : RetryButton)->SetUserFocus(PC);
+				UButton* const PauseButtons[] = {
+				    ResumeButton, SettingsButton, RestartButton, PauseReturnButton, PauseQuitButton};
+				UButton* const ResultButtons[] = {RetryButton, ResultReturnButton, ResultQuitButton};
+				const auto Buttons =
+				    Screen == EScreen::Pause ? MakeArrayView(PauseButtons) : MakeArrayView(ResultButtons);
+				bool bMenuFocused = false;
+				for (UButton* Button : Buttons)
+				{
+					if (!Button)
+					{
+						continue;
+					}
+					const bool bFocused = Button->HasUserFocus(PC);
+					bMenuFocused |= bFocused;
+					const bool bSelected = bFocused || (!bUsingGamepad && Button->IsHovered());
+					Button->SetBackgroundColor(
+					    bSelected ? FLinearColor(0.33f, 0.035f, 0.055f) : FLinearColor(0.025f, 0.03f, 0.037f));
+				}
+				if (!bMenuFocused)
+				{
+					Buttons[0]->SetUserFocus(PC);
+				}
 			}
-		}
-		for (UButton* Button : {ResumeButton.Get(), RestartButton.Get(), SettingsButton.Get(), RetryButton.Get()})
-		{
-			const bool bSelected = Button->HasUserFocus(GetOwningPlayer()) || Button->IsHovered();
-			Button->SetBackgroundColor(
-			    bSelected ? FLinearColor(0.33f, 0.035f, 0.055f) : FLinearColor(0.025f, 0.03f, 0.037f));
 		}
 	}
 	if (ScoreEventText && ScoreEventUntil > 0.0)
