@@ -154,6 +154,7 @@ private:
 		PracticeCombos,
 		MixedCombo,
 		AirCombo,
+		WeaponSwitch,
 		Checkpoint,
 		Parry
 	};

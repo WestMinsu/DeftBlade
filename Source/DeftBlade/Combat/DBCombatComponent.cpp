@@ -1804,6 +1804,10 @@ void UDBCombatComponent::SweepAttack(
 	const int32 Samples = Source == EDBHitTraceSource::Weapon
 	                          ? FMath::Clamp(FMath::CeilToInt(Length / (WeaponData->BladeTraceRadius * 2.0f)), 1, 64)
 	                          : 0;
+	const float Radius = Source == EDBHitTraceSource::Weapon && ActiveAttack.WeaponTraceRadius > 0.0f
+	                         ? ActiveAttack.WeaponTraceRadius
+	                         : WeaponData->BladeTraceRadius;
+	const FCollisionShape Shape = FCollisionShape::MakeSphere(Radius);
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(DBBlade), false, GetOwner());
 	TArray<FHitResult> Hits;
 	for (int32 Sample = 0; Sample <= Samples && ActiveActionId == ActionId; ++Sample)
@@ -1811,7 +1815,7 @@ void UDBCombatComponent::SweepAttack(
 		const FVector Local = Samples ? FMath::Lerp(Base, Tip, static_cast<float>(Sample) / Samples) : Base;
 		Hits.Reset();
 		GetWorld()->SweepMultiByChannel(Hits, From.TransformPosition(Local), To.TransformPosition(Local),
-		    FQuat::Identity, DBCollision::Melee, FCollisionShape::MakeSphere(WeaponData->BladeTraceRadius), Params);
+		    FQuat::Identity, DBCollision::Melee, Shape, Params);
 		for (const FHitResult& Hit : Hits)
 		{
 			ApplyAttackHit(Hit, (To.TransformPosition(Local) - From.TransformPosition(Local)).GetSafeNormal(),

@@ -39,6 +39,10 @@ namespace
 		{
 			return NSLOCTEXT("DeftBlade", "TutorialRightTrigger", "RT");
 		}
+		if (Key == EKeys::Gamepad_DPad_Up)
+		{
+			return NSLOCTEXT("DeftBlade", "TutorialDPadUp", "D-PAD ↑");
+		}
 		return Key.GetDisplayName(false);
 	}
 }
@@ -107,6 +111,9 @@ void UDBPlayerHUDWidget::UpdateTutorial()
 					break;
 				case EDBEncounterState::AirReinforcement:
 					Next = StageTime < 12.0 ? ETutorialHint::AirCombo : ETutorialHint::None;
+					break;
+				case EDBEncounterState::Reinforcements:
+					Next = StageTime < 12.0 ? ETutorialHint::WeaponSwitch : ETutorialHint::None;
 					break;
 				default:
 					break;
@@ -206,6 +213,14 @@ void UDBPlayerHUDWidget::RenderTutorial()
 			break;
 		case ETutorialHint::Checkpoint:
 			Title = NSLOCTEXT("DeftBlade", "CheckpointSavedTitle", "CHECKPOINT SAVED");
+			break;
+		case ETutorialHint::WeaponSwitch:
+			Title = NSLOCTEXT("DeftBlade", "TutorialWeaponSwitchTitle", "SWITCH WEAPONS");
+			Body = NSLOCTEXT("DeftBlade", "TutorialWeaponSwitchBody",
+			    "Switch during the sword's second light attack to sweep nearby enemies with the axe.");
+			Input = FText::Format(NSLOCTEXT("DeftBlade", "TutorialWeaponSwitchInput",
+			                          "{0}  Switch weapon     ·     {1} ×2 → {0}  Switch combo"),
+			    PromptKey(Bindings.SwitchWeapon), Light);
 			break;
 		case ETutorialHint::Parry:
 			Title = NSLOCTEXT("DeftBlade", "TutorialParryTitle", "PARRY THE STRIKE");

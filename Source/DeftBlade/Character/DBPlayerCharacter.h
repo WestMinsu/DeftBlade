@@ -23,6 +23,7 @@ struct FDBTutorialBindings
 	FKey HeavyAttack;
 	FKey Jump;
 	FKey Evade;
+	FKey SwitchWeapon;
 };
 
 /** Input/movement policy lives in C++; the Blueprint child supplies assets. */

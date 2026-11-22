@@ -354,7 +354,7 @@ FDBTutorialBindings ADBPlayerCharacter::GetTutorialBindings(bool bGamepad) const
 		return FKey();
 	};
 	return {FindBinding(LightAttackAction), FindBinding(HeavyAttackAction), FindBinding(JumpAction),
-	    FindBinding(EvadeAction)};
+	    FindBinding(EvadeAction), FindBinding(SwitchWeaponAction)};
 }
 
 void ADBPlayerCharacter::HeavyAttack()

@@ -95,6 +95,10 @@ struct FDBAttackDefinition
 	UPROPERTY(EditAnywhere)
 	TArray<FDBAttackWindow> HitWindows = {FDBAttackWindow()};
 
+	/** Weapon sweep radius for this attack in cm. Zero uses the weapon's default radius. */
+	UPROPERTY(EditAnywhere, meta = (ClampMin = "0", Units = "cm"))
+	float WeaponTraceRadius = 0.0f;
+
 	/** Light input can arm a parry during this move; Light1 also enables idle parries. */
 	UPROPERTY(EditAnywhere)
 	bool bCanParry = false;
