@@ -20,6 +20,14 @@
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "UI/DBPlayerHUD.h"
+#include "Kismet/GameplayStatics.h"
+
+namespace
+{
+	constexpr float GroupArrivalLeadTime = 0.4f;
+	constexpr double GroupPairInterval = 0.5;
+	constexpr int32 GroupPairSize = 2;
+}
 
 ADBCombatEncounter::ADBCombatEncounter()
 {
@@ -36,8 +44,10 @@ ADBCombatEncounter::ADBCombatEncounter()
 	EntranceGate = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("EntranceGate"));
 	ExitGate = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ExitGate"));
 	ReinforcementGate = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ReinforcementGate"));
+	GroupReinforcementGate = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("GroupReinforcementGate"));
 	BossGate = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BossGate"));
-	for (UStaticMeshComponent* Gate : {EntranceGate.Get(), ExitGate.Get(), ReinforcementGate.Get(), BossGate.Get()})
+	for (UStaticMeshComponent* Gate :
+	    {EntranceGate.Get(), ExitGate.Get(), ReinforcementGate.Get(), GroupReinforcementGate.Get(), BossGate.Get()})
 	{
 		Gate->SetupAttachment(RootComponent);
 		Gate->SetCollisionProfileName(TEXT("BlockAll"));
@@ -53,6 +63,7 @@ void ADBCombatEncounter::BeginPlay()
 		Boss->FindComponentByClass<UDBHealthComponent>()->OnDeath.AddUObject(this, &ThisClass::BossDefeated);
 	}
 	GateClosedLocation = ReinforcementGate->GetRelativeLocation();
+	GroupGateClosedLocation = GroupReinforcementGate->GetRelativeLocation();
 	if (IsValid(FinishArea))
 	{
 		FinishArea->SetActorEnableCollision(false);
@@ -385,7 +396,8 @@ void ADBCombatEncounter::BindEnemy(ADBEnemyCharacter* Enemy)
 
 void ADBCombatEncounter::StartReinforcements(EDBEncounterState NewState)
 {
-	if (State != EDBEncounterState::ParryReinforcement)
+	const bool bStageGroup = NewState == EDBEncounterState::Reinforcements && GroupReinforcementGate->GetStaticMesh();
+	if (bStageGroup || State != EDBEncounterState::ParryReinforcement)
 	{
 		GateOpenStartedAt = GetWorld()->GetTimeSeconds();
 		SetActorTickEnabled(true);
@@ -399,7 +411,15 @@ void ADBCombatEncounter::StartReinforcements(EDBEncounterState NewState)
 	{
 		for (const FDBReinforcementSpawn& Spawn : Reinforcements)
 		{
-			SpawnReinforcement(Spawn, false);
+			if (ADBEnemyCharacter* Enemy = SpawnReinforcement(Spawn, false, bStageGroup); Enemy && bStageGroup)
+			{
+				StagedReinforcements.Add(Enemy);
+			}
+		}
+		if (bStageGroup && GroupArrivalSound && !StagedReinforcements.IsEmpty())
+		{
+			UGameplayStatics::PlaySoundAtLocation(
+			    this, GroupArrivalSound, GroupReinforcementGate->GetComponentLocation());
 		}
 	}
 	if (GateOpenStartedAt < 0)
@@ -408,7 +428,7 @@ void ADBCombatEncounter::StartReinforcements(EDBEncounterState NewState)
 	}
 }
 
-ADBEnemyCharacter* ADBCombatEncounter::SpawnReinforcement(const FDBReinforcementSpawn& Spawn, bool bDrop)
+ADBEnemyCharacter* ADBCombatEncounter::SpawnReinforcement(const FDBReinforcementSpawn& Spawn, bool bDrop, bool bStage)
 {
 	if (!Spawn.EnemyClass || !IsValid(Spawn.SpawnPoint))
 	{
@@ -416,11 +436,21 @@ ADBEnemyCharacter* ADBCombatEncounter::SpawnReinforcement(const FDBReinforcement
 	}
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButDontSpawnIfColliding;
-	auto* Enemy = GetWorld()->SpawnActor<ADBEnemyCharacter>(
-	    Spawn.EnemyClass, Spawn.SpawnPoint->GetActorLocation(), Spawn.SpawnPoint->GetActorRotation(), Params);
+	Params.bDeferConstruction = bStage;
+	const FTransform SpawnTransform(Spawn.SpawnPoint->GetActorRotation(), Spawn.SpawnPoint->GetActorLocation());
+	auto* Enemy = GetWorld()->SpawnActor<ADBEnemyCharacter>(Spawn.EnemyClass, SpawnTransform, Params);
 	if (!Enemy)
 	{
 		return nullptr;
+	}
+	if (bStage)
+	{
+		Enemy->AutoPossessAI = EAutoPossessAI::Disabled;
+		Enemy->FinishSpawning(SpawnTransform);
+		if (!IsValid(Enemy))
+		{
+			return nullptr;
+		}
 	}
 	Enemies.Add(Enemy);
 	BindEnemy(Enemy);
@@ -449,6 +479,24 @@ ADBEnemyCharacter* ADBCombatEncounter::SpawnReinforcement(const FDBReinforcement
 	return Enemy;
 }
 
+void ADBCombatEncounter::ReleaseStagedReinforcements(int32 Count)
+{
+	const int32 ReleaseCount = FMath::Min(Count, StagedReinforcements.Num());
+	for (int32 Index = 0; Index < ReleaseCount; ++Index)
+	{
+		ADBEnemyCharacter* Enemy = StagedReinforcements[Index].Get();
+		if (Enemy && !Enemy->FindComponentByClass<UDBHealthComponent>()->IsDead())
+		{
+			Enemy->SpawnDefaultController();
+			if (auto* AI = Cast<ADBEnemyAIController>(Enemy->GetController()))
+			{
+				AI->RememberAttacker(EncounterPlayer.Get());
+			}
+		}
+	}
+	StagedReinforcements.RemoveAt(0, ReleaseCount);
+}
+
 void ADBCombatEncounter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
@@ -461,17 +509,40 @@ void ADBCombatEncounter::Tick(float DeltaSeconds)
 	{
 		return;
 	}
+	const bool bOpeningGroupGate =
+	    State == EDBEncounterState::Reinforcements && GroupReinforcementGate->GetStaticMesh();
+	const double Now = GetWorld()->GetTimeSeconds();
+	const double LeadTime = bOpeningGroupGate ? GroupArrivalLeadTime : 0.0;
 	const float Alpha =
-	    FMath::Clamp((GetWorld()->GetTimeSeconds() - GateOpenStartedAt) / FMath::Max(GateOpenDuration, 0.1f), 0.0, 1.0);
-	ReinforcementGate->SetRelativeLocation(
-	    GateClosedLocation + FVector(0, 0, GateLiftHeight * FMath::InterpEaseInOut(0.f, 1.f, Alpha, 2.f)));
-	if (Alpha >= 1)
+	    FMath::Clamp((Now - GateOpenStartedAt - LeadTime) / FMath::Max(GateOpenDuration, 0.1f), 0.0, 1.0);
+	UStaticMeshComponent* Gate = bOpeningGroupGate ? GroupReinforcementGate.Get() : ReinforcementGate.Get();
+	const FVector& ClosedLocation = bOpeningGroupGate ? GroupGateClosedLocation : GateClosedLocation;
+	Gate->SetRelativeLocation(
+	    ClosedLocation + FVector(0, 0, GateLiftHeight * FMath::InterpEaseInOut(0.f, 1.f, Alpha, 2.f)));
+	if (Alpha < 1.0f)
 	{
-		GateOpenStartedAt = -1;
-		SetActorTickEnabled(false);
-		UpdateGates();
-		CheckCleared();
+		return;
 	}
+
+	if (bOpeningGroupGate)
+	{
+		if (SecondPairReleaseAt < 0)
+		{
+			Gate->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			ReleaseStagedReinforcements(GroupPairSize);
+			SecondPairReleaseAt = Now + GroupPairInterval;
+		}
+		if (Now < SecondPairReleaseAt && !StagedReinforcements.IsEmpty())
+		{
+			return;
+		}
+		ReleaseStagedReinforcements(StagedReinforcements.Num());
+		SecondPairReleaseAt = -1;
+	}
+	GateOpenStartedAt = -1;
+	SetActorTickEnabled(false);
+	UpdateGates();
+	CheckCleared();
 }
 
 void ADBCombatEncounter::PlayerDied()
@@ -505,8 +576,13 @@ void ADBCombatEncounter::UpdateGates()
 	    State == EDBEncounterState::Active || State == EDBEncounterState::AirReinforcement || bReinforcementActive);
 	const bool bCleared = State == EDBEncounterState::Cleared || State == EDBEncounterState::Completed;
 	SetGate(ExitGate, !bCleared);
-	SetGate(ReinforcementGate, !bCleared && (!bReinforcementActive || GateOpenStartedAt >= 0));
-	SetGate(BossGate, State == EDBEncounterState::BossActive || State == EDBEncounterState::BossIntroduction);
+	const bool bHasGroupGate = GroupReinforcementGate->GetStaticMesh() != nullptr;
+	const bool bGroupActive = State == EDBEncounterState::Reinforcements && bHasGroupGate;
+	const bool bBossPhase = State == EDBEncounterState::BossActive || State == EDBEncounterState::BossIntroduction;
+	SetGate(ReinforcementGate, !bCleared && (!bReinforcementActive || (GateOpenStartedAt >= 0 && !bGroupActive)));
+	SetGate(
+	    GroupReinforcementGate, bHasGroupGate && !bCleared && !bBossPhase && (!bGroupActive || GateOpenStartedAt >= 0));
+	SetGate(BossGate, bBossPhase);
 	if (IsValid(BossCheckpointIndicator))
 	{
 		BossCheckpointIndicator->SetActorHiddenInGame(State != EDBEncounterState::Cleared);

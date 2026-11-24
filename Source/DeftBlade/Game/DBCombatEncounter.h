@@ -15,6 +15,7 @@ class UStaticMeshComponent;
 class ACameraActor;
 class APlayerController;
 class UAnimMontage;
+class USoundBase;
 
 UENUM(BlueprintType)
 enum class EDBEncounterState : uint8
@@ -138,6 +139,11 @@ protected:
 	TArray<FDBReinforcementSpawn> Reinforcements;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Encounter|Reinforcements")
 	TObjectPtr<UStaticMeshComponent> ReinforcementGate;
+	/** The optional inner shutter stages the final group behind cover before it enters. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Encounter|Reinforcements")
+	TObjectPtr<UStaticMeshComponent> GroupReinforcementGate;
+	UPROPERTY(EditInstanceOnly, Category = "Encounter|Reinforcements")
+	TObjectPtr<USoundBase> GroupArrivalSound;
 	UPROPERTY(EditAnywhere, Category = "Encounter|Reinforcements", meta = (ClampMin = "0.1", Units = "s"))
 	float GateOpenDuration = 0.8f;
 	UPROPERTY(EditAnywhere, Category = "Encounter|Reinforcements", meta = (ClampMin = "0", Units = "cm"))
@@ -155,7 +161,8 @@ private:
 	void CheckCleared();
 	void BossDefeated();
 	void StartReinforcements(EDBEncounterState NewState);
-	ADBEnemyCharacter* SpawnReinforcement(const FDBReinforcementSpawn& Spawn, bool bDrop);
+	ADBEnemyCharacter* SpawnReinforcement(const FDBReinforcementSpawn& Spawn, bool bDrop, bool bStage = false);
+	void ReleaseStagedReinforcements(int32 Count);
 	void BindEnemy(ADBEnemyCharacter* Enemy);
 	void BindPlayer(ADBPlayerCharacter* Player);
 	void StartBossIntroduction();
@@ -167,7 +174,10 @@ private:
 	void UpdateGates();
 	TWeakObjectPtr<ADBPlayerCharacter> EncounterPlayer;
 	FVector GateClosedLocation = FVector::ZeroVector;
+	FVector GroupGateClosedLocation = FVector::ZeroVector;
+	TArray<TWeakObjectPtr<ADBEnemyCharacter>> StagedReinforcements;
 	double GateOpenStartedAt = -1;
+	double SecondPairReleaseAt = -1;
 	double BossIntroductionStartedAt = -1;
 	bool bReturningFromIntroduction = false;
 	bool bRestoredBossCheckpoint = false;
