@@ -43,7 +43,9 @@ enum class EDBAttackId : uint8
 	AirHeavy,
 	BossLeap,
 	BossWhirlwind,
-	ChargedHeavy
+	ChargedHeavy,
+	BossThrust,
+	BossPounce
 };
 
 /** Times are montage seconds, independent of playback rate. */
@@ -68,6 +70,11 @@ struct FDBAttackWindow
 	}
 };
 
+inline bool IsBossLeapAttack(EDBAttackId Id)
+{
+	return Id == EDBAttackId::BossLeap || Id == EDBAttackId::BossPounce;
+}
+
 USTRUCT(BlueprintType)
 struct FDBAttackDefinition
 {
@@ -91,6 +98,10 @@ struct FDBAttackDefinition
 
 	UPROPERTY(EditAnywhere, meta = (ClampMin = "0.01"))
 	float PlayRate = 1.0f;
+
+	/** Montage time when AI stops tracking the target. Negative uses the first hit window. */
+	UPROPERTY(EditAnywhere, Category = "AI", meta = (ClampMin = "-1", Units = "s"))
+	float AimLockTime = -1.0f;
 
 	/** Separate swings in one motion may each damage the same target once. */
 	UPROPERTY(EditAnywhere)

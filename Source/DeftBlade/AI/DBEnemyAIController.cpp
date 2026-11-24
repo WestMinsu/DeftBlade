@@ -54,8 +54,9 @@ void ADBEnemyAIController::OnPossess(APawn* InPawn)
 	Super::OnPossess(InPawn);
 	GetPerceptionComponent()->SetSenseEnabled(SightConfig->GetSenseImplementation(), true);
 	GetPerceptionComponent()->OnTargetPerceptionUpdated.AddUniqueDynamic(this, &ThisClass::PerceptionUpdated);
-	if (InPawn->IsA<ADBBossCharacter>())
+	if (auto* Boss = Cast<ADBBossCharacter>(InPawn))
 	{
+		Boss->GetCharacterMovement()->bOrientRotationToMovement = false;
 		GetPathFollowingComponent()->PostProcessMove.BindUObject(this, &ThisClass::LimitBossMovementWhileTurning);
 	}
 	if (const auto* Enemy = Cast<ADBEnemyCharacter>(InPawn); Enemy && Enemy->GetBehaviorTree())
@@ -89,12 +90,14 @@ void ADBEnemyAIController::Tick(float DeltaSeconds)
 	const auto* Combat = Enemy ? Enemy->FindComponentByClass<UDBCombatComponent>() : nullptr;
 	const bool bCanFaceTarget = TrackedTarget.IsValid() && Blackboard && Enemy && Enemy->CanAct() && Combat
 	                            && Combat->GetActionState() == EDBActionState::None;
-	if (auto* Boss = Cast<ADBBossCharacter>(Enemy); Boss && bCanFaceTarget && bHasSight)
+	if (auto* Boss = Cast<ADBBossCharacter>(Enemy))
 	{
-		Boss->GetCharacterMovement()->bOrientRotationToMovement = false;
-		// Keep the same facing update during pursuit, braking and pre-attack aim.
-		const FVector Direction = TrackedTarget->GetActorLocation() - Boss->GetActorLocation();
-		Boss->TurnTowards(Direction.GetSafeNormal2D(), DeltaSeconds);
+		if (bCanFaceTarget && bHasSight)
+		{
+			// Keep the same facing update during pursuit, braking and pre-attack aim.
+			const FVector Direction = TrackedTarget->GetActorLocation() - Boss->GetActorLocation();
+			Boss->TurnTowards(Direction.GetSafeNormal2D(), DeltaSeconds);
+		}
 		return;
 	}
 
@@ -239,9 +242,9 @@ void ADBEnemyAIController::RefreshCombatState()
 	}
 	AActor* Target = bHasSight || bCommittedAttack ? TrackedTarget.Get() : nullptr;
 	UpdateClosePressure();
-	const bool bInRange = Target && Enemy
-	                      && FVector::DistSquared2D(Enemy->GetActorLocation(), Target->GetActorLocation())
-	                             <= FMath::Square(Enemy->GetAttackRange());
+	const bool bInRange =
+	    Target && Enemy
+	    && Enemy->CanAttackAtDistance(FVector::Dist2D(Enemy->GetActorLocation(), Target->GetActorLocation()));
 	FVector MoveGoal = LastSeenLocation;
 	if (Enemy && TrackedTarget.IsValid())
 	{

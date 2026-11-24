@@ -24,7 +24,11 @@ public:
 	virtual bool CanAct() const;
 	virtual bool HasStaggerResistance() const;
 	virtual bool CanBeLaunched() const;
-	virtual EDBAttackId SelectAttack(float Distance, bool bCombo);
+	virtual EDBAttackId SelectAttack(float Distance, bool bCombo) const;
+	virtual bool CanAttackAtDistance(float Distance) const
+	{
+		return Distance <= GetAttackRange();
+	}
 	void BeginDropArrival();
 	UBehaviorTree* GetBehaviorTree() const
 	{

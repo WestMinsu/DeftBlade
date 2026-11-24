@@ -29,8 +29,7 @@ EBTNodeResult::Type UBTTask_DBMeleeAttack::ExecuteTask(UBehaviorTreeComponent& O
 	                     ? Cast<AActor>(AI->GetBlackboardComponent()->GetValueAsObject(DBEnemyBB::Target))
 	                     : nullptr;
 	if (!Enemy || !Enemy->CanAct() || !IsValid(Target)
-	    || FVector::DistSquared2D(Enemy->GetActorLocation(), Target->GetActorLocation())
-	           > FMath::Square(Enemy->GetAttackRange()))
+	    || !Enemy->CanAttackAtDistance(FVector::Dist2D(Enemy->GetActorLocation(), Target->GetActorLocation())))
 	{
 		return EBTNodeResult::Failed;
 	}
@@ -40,13 +39,6 @@ EBTNodeResult::Type UBTTask_DBMeleeAttack::ExecuteTask(UBehaviorTreeComponent& O
 		return EBTNodeResult::Failed;
 	}
 	AI->StopMovement();
-	AttackId = Enemy->SelectAttack(
-	    FVector::Dist2D(Enemy->GetActorLocation(), Target->GetActorLocation()), FMath::FRand() < ComboChance);
-	const FDBAttackDefinition* Attack = Combat->FindAttack(AttackId);
-	if (!Attack || !Attack->IsValid())
-	{
-		return EBTNodeResult::Failed;
-	}
 	AimStartedAt = Enemy->GetWorld()->GetTimeSeconds();
 	return EBTNodeResult::InProgress;
 }
@@ -71,8 +63,8 @@ void UBTTask_DBMeleeAttack::TickTask(UBehaviorTreeComponent& OwnerComp, uint8*, 
 	};
 	if (RequestId == 0)
 	{
-		if (FVector::DistSquared2D(Enemy->GetActorLocation(), Target->GetActorLocation())
-		    > FMath::Square(Enemy->GetAttackRange()))
+		const float Distance = FVector::Dist2D(Enemy->GetActorLocation(), Target->GetActorLocation());
+		if (!Enemy->CanAttackAtDistance(Distance))
 		{
 			FinishLatentTask(OwnerComp, EBTNodeResult::Failed);
 			return;
@@ -96,6 +88,7 @@ void UBTTask_DBMeleeAttack::TickTask(UBehaviorTreeComponent& OwnerComp, uint8*, 
 		}
 		if (FMath::Abs(FMath::FindDeltaAngleDegrees(Enemy->GetActorRotation().Yaw, DesiredRotation.Yaw)) <= 15.0)
 		{
+			const EDBAttackId AttackId = Enemy->SelectAttack(Distance, FMath::FRand() < ComboChance);
 			Combat->RequestAttack(AttackId);
 			RequestId = Combat->GetBufferedAction().Id;
 			if (!RequestId)
@@ -110,12 +103,16 @@ void UBTTask_DBMeleeAttack::TickTask(UBehaviorTreeComponent& OwnerComp, uint8*, 
 		bStarted = true;
 		const FDBAttackDefinition* Attack = Combat->FindAttack(Combat->GetAttackId());
 		UAnimInstance* Anim = Enemy->GetMesh()->GetAnimInstance();
-		// Track during the visible preparation, then commit the whole pattern before its first hit.
-		if (Attack && Anim
-		    && Anim->Montage_GetPosition(Attack->Montage)
-		           < Attack->HitWindows[0].Start - 0.10f * Attack->PlayRate * Attack->Montage->RateScale)
+		if (Attack && Anim && Anim->Montage_IsActive(Attack->Montage))
 		{
-			TurnTowardsTarget();
+			const float AimLockTime =
+			    Attack->AimLockTime >= 0.0f
+			        ? Attack->AimLockTime
+			        : Attack->HitWindows[0].Start - 0.10f * Attack->PlayRate * Attack->Montage->RateScale;
+			if (Anim->Montage_GetPosition(Attack->Montage) < AimLockTime)
+			{
+				TurnTowardsTarget();
+			}
 		}
 		return;
 	}

@@ -562,7 +562,7 @@ EDBAttackId UDBCombatComponent::NextAttack(EDBActionInput Input) const
 bool UDBCombatComponent::IsAttackMovementValid(EDBAttackId Id) const
 {
 	const UCharacterMovementComponent* Movement = CastChecked<ACharacter>(GetOwner())->GetCharacterMovement();
-	if (Id == EDBAttackId::BossLeap)
+	if (IsBossLeapAttack(Id))
 	{
 		return Movement->IsMovingOnGround() || Movement->IsFlying();
 	}

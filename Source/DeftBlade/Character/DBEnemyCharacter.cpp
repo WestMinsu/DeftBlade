@@ -72,7 +72,7 @@ bool ADBEnemyCharacter::CanAct() const
 	       && GetWorld()->GetTimeSeconds() >= HitStunEndsAt && GetWorld()->GetTimeSeconds() >= LandingRecoveryEndsAt;
 }
 
-EDBAttackId ADBEnemyCharacter::SelectAttack(float, bool bCombo)
+EDBAttackId ADBEnemyCharacter::SelectAttack(float, bool bCombo) const
 {
 	return bCombo ? EDBAttackId::Heavy1 : EDBAttackId::Light1;
 }

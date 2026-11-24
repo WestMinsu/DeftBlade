@@ -8,6 +8,13 @@
 #include "Components/WidgetComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
+namespace
+{
+	constexpr float ThrustRange = 600.0f;
+	constexpr float PounceMinimumRange = 570.0f;
+	constexpr float PounceRange = 680.0f;
+}
+
 ADBBossCharacter::ADBBossCharacter()
 {
 	AutoPossessAI = EAutoPossessAI::Disabled;
@@ -69,8 +76,7 @@ void ADBBossCharacter::BeginPlay()
 bool ADBBossCharacter::CanAct() const
 {
 	// Keep the committed BT task alive during this authored leap, without enabling ordinary airborne attacks.
-	return Super::CanAct()
-	       || (CombatComponent->GetAttackId() == EDBAttackId::BossLeap && GetCharacterMovement()->IsFlying());
+	return Super::CanAct() || (IsBossLeapAttack(CombatComponent->GetAttackId()) && GetCharacterMovement()->IsFlying());
 }
 
 bool ADBBossCharacter::CanBeLaunched() const
@@ -103,7 +109,8 @@ void ADBBossCharacter::OnMovementModeChanged(EMovementMode PreviousMovementMode,
 void ADBBossCharacter::HandleAttackStarted()
 {
 	ParryOpeningEndsAt = 0.0;
-	if (CombatComponent->GetAttackId() == EDBAttackId::BossLeap)
+	PreviousAttack = CombatComponent->GetAttackId();
+	if (IsBossLeapAttack(PreviousAttack))
 	{
 		// Flying lets CMC apply the montage's authored vertical root motion, including collision sweeps.
 		GetCharacterMovement()->SetMovementMode(MOVE_Flying);
@@ -114,7 +121,7 @@ void ADBBossCharacter::HandleAttackStarted()
 void ADBBossCharacter::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	if (CombatComponent->GetAttackId() != EDBAttackId::BossLeap)
+	if (!IsBossLeapAttack(CombatComponent->GetAttackId()))
 	{
 		if (GetCharacterMovement()->IsFlying())
 		{
@@ -158,8 +165,31 @@ float ADBBossCharacter::TakeDamage(
 	return Applied;
 }
 
-EDBAttackId ADBBossCharacter::SelectAttack(float Distance, bool bCombo)
+bool ADBBossCharacter::CanAttackAtDistance(float Distance) const
 {
+	return Super::CanAttackAtDistance(Distance) || SelectApproachAttack(Distance) != EDBAttackId::None;
+}
+
+EDBAttackId ADBBossCharacter::SelectApproachAttack(float Distance) const
+{
+	if (Distance >= PounceMinimumRange && Distance <= PounceRange && PreviousAttack != EDBAttackId::BossPounce)
+	{
+		return EDBAttackId::BossPounce;
+	}
+	if (Distance <= ThrustRange && PreviousAttack != EDBAttackId::BossThrust)
+	{
+		return EDBAttackId::BossThrust;
+	}
+	return EDBAttackId::None;
+}
+
+EDBAttackId ADBBossCharacter::SelectAttack(float Distance, bool bCombo) const
+{
+	if (!Super::CanAttackAtDistance(Distance))
+	{
+		return SelectApproachAttack(Distance);
+	}
+
 	const auto* AI = Cast<ADBEnemyAIController>(GetController());
 	const auto* Target = AI && AI->GetBlackboardComponent()
 	                         ? Cast<ACharacter>(AI->GetBlackboardComponent()->GetValueAsObject(DBEnemyBB::Target))
@@ -184,6 +214,5 @@ EDBAttackId ADBBossCharacter::SelectAttack(float Distance, bool bCombo)
 	{
 		Next = Next == EDBAttackId::Heavy1 ? EDBAttackId::Light1 : EDBAttackId::Heavy1;
 	}
-	PreviousAttack = Next;
 	return Next;
 }

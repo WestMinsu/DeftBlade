@@ -15,7 +15,8 @@ public:
 	virtual bool CanAct() const override;
 	virtual bool HasStaggerResistance() const override;
 	virtual bool CanBeLaunched() const override;
-	virtual EDBAttackId SelectAttack(float Distance, bool bCombo) override;
+	virtual bool CanAttackAtDistance(float Distance) const override;
+	virtual EDBAttackId SelectAttack(float Distance, bool bCombo) const override;
 	virtual float TakeDamage(
 	    float Amount, const FDamageEvent& Event, AController* EventInstigator, AActor* Causer) override;
 
@@ -34,6 +35,7 @@ protected:
 	TArray<TObjectPtr<USkeletalMeshComponent>> Armour;
 
 private:
+	EDBAttackId SelectApproachAttack(float Distance) const;
 	void SharePose();
 	void HandleAttackStarted();
 	void OpenParryOpening(AActor* Defender);
