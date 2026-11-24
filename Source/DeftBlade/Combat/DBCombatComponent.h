@@ -54,7 +54,7 @@ struct FDBBufferedAction
 	/** Only set for a switch link; shares the same single pending-input slot. */
 	UPROPERTY()
 	TObjectPtr<UDBWeaponData> Weapon;
-	/** AI-selected opener; player inputs continue to use the authored combo links. */
+	/** Explicit attack selected by AI or a charged player input. */
 	UPROPERTY()
 	EDBAttackId Attack = EDBAttackId::None;
 
@@ -81,6 +81,9 @@ public:
 	void RequestEvade();
 	void RequestAttack(bool bHeavy, const FVector& Direction = FVector::ZeroVector);
 	void RequestAttack(EDBAttackId Attack);
+	void PressHeavyAttack();
+	void ReleaseHeavyAttack();
+	void CancelHeavyCharge();
 	void RequestJump();
 	void ReactToHit(UAnimMontage* Montage);
 	bool CanJumpFromAction() const;
@@ -266,8 +269,9 @@ private:
 	void WeaponPresentationEnded(UAnimMontage* Montage, bool bInterrupted, int32 InstanceId);
 	void UpdateWeaponPresentation();
 	bool CanProcessInput() const;
-	void QueueInput(
-	    EDBActionInput Input, const FVector& Direction = FVector::ZeroVector, UDBWeaponData* NewWeapon = nullptr);
+	void UpdateHeavyCharge(double Now);
+	void QueueInput(EDBActionInput Input, const FVector& Direction = FVector::ZeroVector,
+	    UDBWeaponData* NewWeapon = nullptr, EDBAttackId ExplicitAttack = EDBAttackId::None);
 	bool CanEquipWeapon(const UDBWeaponData* NewWeapon) const;
 	EDBAttackId NextAttack(EDBActionInput Input) const;
 	bool IsAttackMovementValid(EDBAttackId Id) const;
@@ -352,6 +356,8 @@ private:
 	TSet<TWeakObjectPtr<AActor>> HitActors;
 	bool bAttackEndedPending = false;
 	double GroundJumpPressedAt = -1.0;
+	double HeavyChargeStartedAt = -1.0;
+	bool bHeavyChargeReady = false;
 	double LastLightInputAt = -1.0;
 	double ParryWindowEndsAt = 0.0;
 	FVector ParryDirection = FVector::ForwardVector;

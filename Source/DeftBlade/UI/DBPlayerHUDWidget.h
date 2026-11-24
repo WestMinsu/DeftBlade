@@ -186,6 +186,8 @@ private:
 		EvadeSprint,
 		Practice,
 		PracticeCombos,
+		LockOn,
+		ChargedHeavy,
 		MixedCombo,
 		AirCombo,
 		WeaponSwitch,
@@ -194,10 +196,13 @@ private:
 	};
 	ETutorialHint TutorialHint = ETutorialHint::None;
 	double TutorialStageStartedAt = 0.0;
+	double PracticeCombosShownAt = -1.0;
+	double LockOnLearnedAt = -1.0;
 	double ParryInputAllowedAt = 0.0;
 	bool bParryInputReady = false;
 	bool bReachedContextLesson = false;
 	bool bParryTaught = false;
+	bool bChargedAttackTried = false;
 	TWeakObjectPtr<UDBCombatComponent> TutorialAttacker;
 	FVector TutorialImpactPoint = FVector::ZeroVector;
 	uint64 TutorialAttackId = 0;

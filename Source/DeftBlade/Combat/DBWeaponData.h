@@ -42,7 +42,8 @@ enum class EDBAttackId : uint8
 	Launcher,
 	AirHeavy,
 	BossLeap,
-	BossWhirlwind
+	BossWhirlwind,
+	ChargedHeavy
 };
 
 /** Times are montage seconds, independent of playback rate. */
@@ -220,6 +221,16 @@ public:
 
 	UPROPERTY(EditAnywhere, Category = "Protection Feedback")
 	TObjectPtr<USoundBase> ProtectedHitSound;
+
+	/** Holding the ground heavy opener can select ChargedHeavy. Zero disables the gesture. */
+	UPROPERTY(EditAnywhere, Category = "Combat|Heavy Charge", meta = (ClampMin = "0", Units = "s"))
+	float HeavyChargeTime = 0.0f;
+
+	UPROPERTY(EditAnywhere, Category = "Combat|Heavy Charge")
+	TObjectPtr<UMaterialInterface> HeavyChargeReadyMaterial;
+
+	UPROPERTY(EditAnywhere, Category = "Combat|Heavy Charge")
+	TObjectPtr<USoundBase> HeavyChargeReadySound;
 
 	UPROPERTY(EditAnywhere, Category = "Combat")
 	TArray<FDBAttackDefinition> Attacks;

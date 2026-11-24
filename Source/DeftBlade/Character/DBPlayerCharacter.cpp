@@ -254,6 +254,10 @@ void ADBPlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 	Input->BindAction(EvadeAction, ETriggerEvent::Canceled, this, &ThisClass::StopSprinting);
 	Input->BindAction(LightAttackAction, ETriggerEvent::Started, this, &ThisClass::LightAttack);
 	Input->BindAction(HeavyAttackAction, ETriggerEvent::Started, this, &ThisClass::HeavyAttack);
+	Input->BindAction(
+	    HeavyAttackAction, ETriggerEvent::Completed, CombatComponent.Get(), &UDBCombatComponent::ReleaseHeavyAttack);
+	Input->BindAction(
+	    HeavyAttackAction, ETriggerEvent::Canceled, CombatComponent.Get(), &UDBCombatComponent::CancelHeavyCharge);
 	Input->BindAction(PauseAction, ETriggerEvent::Started, this, &ThisClass::PauseGame);
 }
 
@@ -354,13 +358,13 @@ FDBTutorialBindings ADBPlayerCharacter::GetTutorialBindings(bool bGamepad) const
 		return FKey();
 	};
 	return {FindBinding(LightAttackAction), FindBinding(HeavyAttackAction), FindBinding(JumpAction),
-	    FindBinding(EvadeAction), FindBinding(SwitchWeaponAction)};
+	    FindBinding(EvadeAction), FindBinding(SwitchWeaponAction), FindBinding(LockOnAction)};
 }
 
 void ADBPlayerCharacter::HeavyAttack()
 {
 	StopSprinting();
-	CombatComponent->RequestAttack(true);
+	CombatComponent->PressHeavyAttack();
 }
 
 void ADBPlayerCharacter::SwitchWeapon()

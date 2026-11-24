@@ -4,6 +4,7 @@
 #include "Character/DBPlayerCharacter.h"
 #include "Combat/DBCombatComponent.h"
 #include "Combat/DBHealthComponent.h"
+#include "Combat/DBTargetingComponent.h"
 #include "Combat/DBTrainingDummy.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/TextBlock.h"
@@ -13,6 +14,10 @@
 
 namespace
 {
+	constexpr double PracticeComboDuration = 3.5;
+	constexpr double CombatLockOnDuration = 5.0;
+	constexpr double LockOnConfirmDuration = 0.8;
+
 	FText PromptKey(const FKey& Key)
 	{
 		if (Key == EKeys::LeftMouseButton)
@@ -22,6 +27,14 @@ namespace
 		if (Key == EKeys::RightMouseButton)
 		{
 			return NSLOCTEXT("DeftBlade", "TutorialRightMouse", "RMB");
+		}
+		if (Key == EKeys::MiddleMouseButton)
+		{
+			return NSLOCTEXT("DeftBlade", "TutorialMiddleMouse", "MOUSE WHEEL CLICK");
+		}
+		if (Key == EKeys::Gamepad_RightThumbstick)
+		{
+			return NSLOCTEXT("DeftBlade", "TutorialRightStickClick", "RIGHT STICK CLICK (R3)");
 		}
 		if (Key == EKeys::Gamepad_FaceButton_Bottom)
 		{
@@ -75,7 +88,13 @@ void UDBPlayerHUDWidget::UpdateTutorial()
 		}
 		else if (IsValid(Dummy))
 		{
-			const double StageTime = GetWorld()->GetTimeSeconds() - TutorialStageStartedAt;
+			const double Now = GetWorld()->GetTimeSeconds();
+			const double StageTime = Now - TutorialStageStartedAt;
+			if (LockOnLearnedAt < 0.0 && (State == EDBEncounterState::Ready || State == EDBEncounterState::Active)
+			    && TargetingSource.IsValid() && TargetingSource->IsLockedOn())
+			{
+				LockOnLearnedAt = Now;
+			}
 			switch (State)
 			{
 				case EDBEncounterState::Ready:
@@ -83,7 +102,31 @@ void UDBPlayerHUDWidget::UpdateTutorial()
 					const FVector Position = HealthSource->GetOwner()->GetActorLocation();
 					if (FVector::DistSquared(Dummy->GetActorLocation(), Position) <= FMath::Square(340.0))
 					{
-						Next = Dummy->HasPracticeHit() ? ETutorialHint::PracticeCombos : ETutorialHint::Practice;
+						if (!Dummy->HasPracticeHit())
+						{
+							Next = ETutorialHint::Practice;
+						}
+						else
+						{
+							if (PracticeCombosShownAt < 0.0)
+							{
+								PracticeCombosShownAt = Now;
+							}
+							if (Now - PracticeCombosShownAt < PracticeComboDuration)
+							{
+								Next = ETutorialHint::PracticeCombos;
+							}
+							else if (LockOnLearnedAt < 0.0
+							         || (TutorialHint == ETutorialHint::LockOn
+							             && Now - LockOnLearnedAt < LockOnConfirmDuration))
+							{
+								Next = ETutorialHint::LockOn;
+							}
+							else if (!bChargedAttackTried)
+							{
+								Next = ETutorialHint::ChargedHeavy;
+							}
+						}
 					}
 					else
 					{
@@ -107,17 +150,51 @@ void UDBPlayerHUDWidget::UpdateTutorial()
 					break;
 				}
 				case EDBEncounterState::Active:
-					Next = StageTime < 7.0 ? ETutorialHint::MixedCombo : ETutorialHint::None;
+				{
+					double LockOnEnd = TutorialStageStartedAt;
+					if (LockOnLearnedAt < 0.0)
+					{
+						LockOnEnd += CombatLockOnDuration;
+					}
+					else if (LockOnLearnedAt >= TutorialStageStartedAt)
+					{
+						LockOnEnd = FMath::Min(
+						    TutorialStageStartedAt + CombatLockOnDuration, LockOnLearnedAt + LockOnConfirmDuration);
+					}
+					if (Now < LockOnEnd)
+					{
+						Next = ETutorialHint::LockOn;
+					}
+					else if (Now - LockOnEnd < 7.0)
+					{
+						Next = ETutorialHint::MixedCombo;
+					}
 					break;
+				}
 				case EDBEncounterState::AirReinforcement:
 					Next = StageTime < 12.0 ? ETutorialHint::AirCombo : ETutorialHint::None;
 					break;
 				case EDBEncounterState::Reinforcements:
 					Next = StageTime < 12.0 ? ETutorialHint::WeaponSwitch : ETutorialHint::None;
 					break;
+				case EDBEncounterState::Cleared:
+					if (!bChargedAttackTried && EncounterSource->GetBoss())
+					{
+						Next = ETutorialHint::ChargedHeavy;
+					}
+					break;
 				default:
 					break;
 			}
+		}
+	}
+	if (Next == ETutorialHint::ChargedHeavy)
+	{
+		const auto* Combat = HealthSource->GetOwner()->FindComponentByClass<UDBCombatComponent>();
+		if (Combat && Combat->GetAttackId() == EDBAttackId::ChargedHeavy)
+		{
+			bChargedAttackTried = true;
+			Next = ETutorialHint::None;
 		}
 	}
 	if (Next != TutorialHint)
@@ -202,6 +279,19 @@ void UDBPlayerHUDWidget::RenderTutorial()
 			    "Follow a light attack with a heavy attack to branch into a different combo.");
 			Input = FText::Format(
 			    NSLOCTEXT("DeftBlade", "TutorialMixedInput", "{0}   Light   →   {1}   Heavy"), Light, Heavy);
+			break;
+		case ETutorialHint::LockOn:
+			Title = NSLOCTEXT("DeftBlade", "TutorialLockOnTitle", "LOCK ON");
+			Body = NSLOCTEXT("DeftBlade", "TutorialLockOnBody",
+			    "Keep the target on screen and lock on to track it. Press again to release.");
+			Input = FText::Format(
+			    NSLOCTEXT("DeftBlade", "TutorialLockOnInput", "{0}   Lock on / Release"), PromptKey(Bindings.LockOn));
+			break;
+		case ETutorialHint::ChargedHeavy:
+			Title = NSLOCTEXT("DeftBlade", "TutorialChargeTitle", "CHARGE ATTACK");
+			Body =
+			    NSLOCTEXT("DeftBlade", "TutorialChargeBody", "Release when your weapon glows to rush in and strike.");
+			Input = FText::Format(NSLOCTEXT("DeftBlade", "TutorialChargeInput", "Hold {0}   Charge"), Heavy);
 			break;
 		case ETutorialHint::AirCombo:
 			Title = NSLOCTEXT("DeftBlade", "TutorialAirTitle", "AIR COMBO");

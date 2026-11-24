@@ -40,6 +40,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogDBCombat, Log, All);
 
 namespace
 {
+	constexpr double LauncherInputWindow = 0.10;
+
 	bool IsAttackInput(EDBActionInput Input)
 	{
 		return Input == EDBActionInput::LightAttack || Input == EDBActionInput::HeavyAttack
@@ -203,7 +205,7 @@ void UDBCombatComponent::UpdateWeaponPresentation()
 		StopWeaponPresentation();
 	}
 	const double Now = GetWorld()->GetTimeSeconds();
-	if (ActionState != EDBActionState::None || BufferedAction.Id != 0)
+	if (ActionState != EDBActionState::None || BufferedAction.Id != 0 || HeavyChargeStartedAt >= 0.0)
 	{
 		HolsterAfter = Now + AutoHolsterDelay;
 	}
@@ -250,6 +252,7 @@ bool UDBCombatComponent::TryEquipWeapon(UDBWeaponData* NewWeapon)
 	{
 		return false;
 	}
+	CancelHeavyCharge();
 	StopWeaponPresentation();
 	WeaponData = NewWeapon;
 	ParryWindowEndsAt = 0.0;
@@ -321,6 +324,108 @@ void UDBCombatComponent::RequestAttack(bool bHeavy, const FVector& Direction)
 	QueueInput(bHeavy ? EDBActionInput::HeavyAttack : EDBActionInput::LightAttack, Direction);
 }
 
+void UDBCombatComponent::PressHeavyAttack()
+{
+	if (HeavyChargeStartedAt >= 0.0)
+	{
+		return;
+	}
+	const ACharacter* Character = CastChecked<ACharacter>(GetOwner());
+	const double Now = GetWorld()->GetTimeSeconds();
+	if (!WeaponData || WeaponData->HeavyChargeTime <= 0.0f || ActionState != EDBActionState::None
+	    || BufferedAction.Id != 0 || !Character->GetCharacterMovement()->IsMovingOnGround()
+	    || (GroundJumpPressedAt >= 0.0 && Now - GroundJumpPressedAt <= LauncherInputWindow))
+	{
+		RequestAttack(true);
+		return;
+	}
+	const FDBAttackDefinition* ChargedAttack = FindAttack(EDBAttackId::ChargedHeavy);
+	if (!ChargedAttack || !ChargedAttack->IsValid())
+	{
+		RequestAttack(true);
+		return;
+	}
+	if (!CanProcessInput())
+	{
+		return;
+	}
+	ParryWindowEndsAt = 0.0;
+	HeavyChargeStartedAt = Now;
+	if (bWeaponDrawn && !bDrawingWeapon)
+	{
+		StopWeaponPresentation();
+	}
+}
+
+void UDBCombatComponent::ReleaseHeavyAttack()
+{
+	const double Now = GetWorld()->GetTimeSeconds();
+	UpdateHeavyCharge(Now);
+	if (HeavyChargeStartedAt < 0.0)
+	{
+		return;
+	}
+	const EDBAttackId Attack = bHeavyChargeReady ? EDBAttackId::ChargedHeavy : EDBAttackId::None;
+	QueueInput(EDBActionInput::HeavyAttack, FVector::ZeroVector, nullptr, Attack);
+}
+
+void UDBCombatComponent::UpdateHeavyCharge(double Now)
+{
+	if (HeavyChargeStartedAt < 0.0)
+	{
+		return;
+	}
+	if (!CanProcessInput() || ActionState != EDBActionState::None || !IsAttackMovementValid(EDBAttackId::ChargedHeavy))
+	{
+		CancelHeavyCharge();
+		return;
+	}
+	const double HeldTime = Now - HeavyChargeStartedAt;
+	if (HeldTime < WeaponData->HeavyChargeTime)
+	{
+		// Give a hold its own draw, while a quick tap uses the attack's usual draw timing.
+		if (!bWeaponDrawn && WeaponPresentationInstanceId == INDEX_NONE && HeldTime >= 0.16)
+		{
+			if (!PlayWeaponPresentation(true, WeaponData->HeavyChargeTime - HeldTime))
+			{
+				AttachWeapon(true);
+			}
+		}
+		return;
+	}
+	if (bHeavyChargeReady)
+	{
+		return;
+	}
+	bHeavyChargeReady = true;
+	if (!bWeaponDrawn)
+	{
+		StopWeaponPresentation();
+		AttachWeapon(true);
+	}
+	if (WeaponMesh && WeaponData->HeavyChargeReadyMaterial)
+	{
+		PreviousWeaponOverlay = WeaponMesh->GetOverlayMaterial();
+		WeaponMesh->SetOverlayMaterial(WeaponData->HeavyChargeReadyMaterial);
+	}
+	if (WeaponData->HeavyChargeReadySound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(this, WeaponData->HeavyChargeReadySound,
+		    WeaponMesh ? WeaponMesh->GetComponentLocation() : GetOwner()->GetActorLocation());
+	}
+}
+
+void UDBCombatComponent::CancelHeavyCharge()
+{
+	HeavyChargeStartedAt = -1.0;
+	if (bHeavyChargeReady && WeaponMesh && WeaponData && WeaponData->HeavyChargeReadyMaterial)
+	{
+		WeaponMesh->SetOverlayMaterial(PreviousWeaponOverlay);
+		PreviousWeaponOverlay = nullptr;
+	}
+	bHeavyChargeReady = false;
+}
+
 void UDBCombatComponent::RequestJump()
 {
 	QueueInput(EDBActionInput::Jump);
@@ -341,8 +446,11 @@ void UDBCombatComponent::RequestAttack(EDBAttackId Attack)
 	BufferedAction = {++NextRequestId, GetWorld()->GetTimeSeconds(), Input, nullptr, Attack};
 }
 
-void UDBCombatComponent::QueueInput(EDBActionInput Input, const FVector& Direction, UDBWeaponData* NewWeapon)
+void UDBCombatComponent::QueueInput(
+    EDBActionInput Input, const FVector& Direction, UDBWeaponData* NewWeapon, EDBAttackId ExplicitAttack)
 {
+	const double HeavyPressedAt = HeavyChargeStartedAt;
+	CancelHeavyCharge();
 	if (!CanProcessInput())
 	{
 		ResetCombat();
@@ -369,17 +477,19 @@ void UDBCombatComponent::QueueInput(EDBActionInput Input, const FVector& Directi
 	{
 		GroundJumpPressedAt = Now;
 		const bool bQueuedAttack = BufferedAction.Id != 0 && BufferedAction.Input == EDBActionInput::HeavyAttack
-		                           && Now - BufferedAction.ReceivedAt <= 0.10;
-		const bool bFreshGroundAttack = ActionState == EDBActionState::HeavyAttack
-		                                && ActiveAttack.Id != EDBAttackId::Launcher
-		                                && ActiveAttack.Id != EDBAttackId::AirHeavy && Now - ActionStartedAt <= 0.10;
-		if (bQueuedAttack || bFreshGroundAttack)
+		                           && Now - BufferedAction.ReceivedAt <= LauncherInputWindow;
+		const bool bFreshGroundAttack =
+		    ActionState == EDBActionState::HeavyAttack && ActiveAttack.Id != EDBAttackId::Launcher
+		    && ActiveAttack.Id != EDBAttackId::AirHeavy && Now - ActionStartedAt <= LauncherInputWindow;
+		const bool bFreshHeavyPress = HeavyPressedAt >= 0.0 && Now - HeavyPressedAt <= LauncherInputWindow;
+		if (bQueuedAttack || bFreshGroundAttack || bFreshHeavyPress)
 		{
 			Input = EDBActionInput::Launcher;
 		}
 	}
-	else if (Input == EDBActionInput::HeavyAttack && GroundJumpPressedAt >= 0.0 && Now - GroundJumpPressedAt <= 0.10
-	         && ActiveAttack.Id != EDBAttackId::Launcher && (bGrounded || Character->JumpCurrentCount == 1))
+	else if (Input == EDBActionInput::HeavyAttack && GroundJumpPressedAt >= 0.0
+	         && Now - GroundJumpPressedAt <= LauncherInputWindow && ActiveAttack.Id != EDBAttackId::Launcher
+	         && (bGrounded || Character->JumpCurrentCount == 1))
 	{
 		Input = EDBActionInput::Launcher;
 	}
@@ -411,7 +521,7 @@ void UDBCombatComponent::QueueInput(EDBActionInput Input, const FVector& Directi
 		bAirEvadeUsed = true;
 		return;
 	}
-	BufferedAction = {++NextRequestId, Now, Input, NewWeapon};
+	BufferedAction = {++NextRequestId, Now, Input, NewWeapon, ExplicitAttack};
 }
 
 EDBAttackId UDBCombatComponent::NextAttack(EDBActionInput Input) const
@@ -670,6 +780,7 @@ void UDBCombatComponent::TickComponent(
 		// Keep the backward facing until its pose exits. Forward input is handled by the handoff above.
 		CastChecked<ACharacter>(GetOwner())->ConsumeMovementInputVector();
 	}
+	UpdateHeavyCharge(Now);
 	UpdateWeaponPresentation();
 }
 
@@ -1952,7 +2063,9 @@ void UDBCombatComponent::ApplyAttackHit(
 				}
 			}
 		}
-		if (Attack != EDBAttackId::Launcher && ActiveAttack.GroundKnockbackDistance > 0.0f
+		const bool bFinalChargeHit = ActiveHitWindow == ActiveAttack.HitWindows.Num() - 1;
+		if (Attack != EDBAttackId::Launcher && (Attack != EDBAttackId::ChargedHeavy || bFinalChargeHit)
+		    && ActiveAttack.GroundKnockbackDistance > 0.0f
 		    && (Victim->GetCharacterMovement()->IsMovingOnGround() || Attack == EDBAttackId::AirHeavy))
 		{
 			float Distance = ActiveAttack.GroundKnockbackDistance;
@@ -2050,6 +2163,7 @@ void UDBCombatComponent::StopEvadeMontage()
 
 void UDBCombatComponent::ResetCombat()
 {
+	CancelHeavyCharge();
 	StopWeaponPresentation();
 	HolsterAfter = GetWorld()->GetTimeSeconds() + AutoHolsterDelay;
 	ParryWindowEndsAt = 0.0;
