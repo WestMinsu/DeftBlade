@@ -7,6 +7,7 @@
 class UBorder;
 class ADBCombatEncounter;
 class UButton;
+class UHorizontalBox;
 class UDBHealthComponent;
 class UDBCombatComponent;
 class UDBCombatScoreComponent;
@@ -144,6 +145,7 @@ private:
 	void EncounterChanged();
 	void UpdateTutorial();
 	void RenderTutorial();
+	void RenderTutorialInput(const FText& Input, ESlateVisibility InputVisibility, float Opacity);
 	void UpdateBossIntroduction();
 	void BossHealthChanged(float Current, float Maximum);
 	void ShowDeath();
@@ -194,6 +196,8 @@ private:
 		Checkpoint,
 		Parry
 	};
+	UPROPERTY(Transient)
+	TObjectPtr<UHorizontalBox> TutorialGamepadInput;
 	ETutorialHint TutorialHint = ETutorialHint::None;
 	double TutorialStageStartedAt = 0.0;
 	double PracticeCombosShownAt = -1.0;

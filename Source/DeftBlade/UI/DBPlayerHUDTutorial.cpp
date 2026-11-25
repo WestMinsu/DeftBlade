@@ -1,13 +1,21 @@
 #include "UI/DBPlayerHUDWidget.h"
 
 #include "Blueprint/WidgetBlueprintLibrary.h"
+#include "Blueprint/WidgetTree.h"
+#include "Brushes/SlateRoundedBoxBrush.h"
 #include "Character/DBPlayerCharacter.h"
 #include "Combat/DBCombatComponent.h"
 #include "Combat/DBHealthComponent.h"
 #include "Combat/DBTargetingComponent.h"
 #include "Combat/DBTrainingDummy.h"
+#include "Components/Border.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/HorizontalBox.h"
+#include "Components/HorizontalBoxSlot.h"
+#include "Components/SizeBox.h"
 #include "Components/TextBlock.h"
+#include "Components/VerticalBox.h"
+#include "Components/VerticalBoxSlot.h"
 #include "Game/DBCombatEncounter.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/PlatformTime.h"
@@ -17,6 +25,7 @@ namespace
 	constexpr double PracticeComboDuration = 3.5;
 	constexpr double CombatLockOnDuration = 5.0;
 	constexpr double LockOnConfirmDuration = 0.8;
+	constexpr TCHAR GamepadAToken[] = TEXT("\u24B6");
 
 	FText PromptKey(const FKey& Key)
 	{
@@ -38,7 +47,7 @@ namespace
 		}
 		if (Key == EKeys::Gamepad_FaceButton_Bottom)
 		{
-			return FText::FromString(TEXT("A"));
+			return FText::FromString(GamepadAToken);
 		}
 		if (Key == EKeys::Gamepad_FaceButton_Left)
 		{
@@ -329,11 +338,82 @@ void UDBPlayerHUDWidget::RenderTutorial()
 	}
 	TutorialTitle->SetText(Title);
 	TutorialBody->SetText(Body);
-	TutorialInput->SetText(Input);
 	const ESlateVisibility Details = bCheckpoint ? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible;
 	TutorialBody->SetVisibility(Details);
-	TutorialInput->SetVisibility(Details);
-	TutorialInput->SetRenderOpacity(!bModal || bParryInputReady ? 1.0f : 0.55f);
+	RenderTutorialInput(Input, Details, !bModal || bParryInputReady ? 1.0f : 0.55f);
+}
+
+void UDBPlayerHUDWidget::RenderTutorialInput(const FText& Input, ESlateVisibility InputVisibility, float Opacity)
+{
+	const FString Line = Input.ToString();
+	const bool bHasGamepadA = Line.Contains(GamepadAToken);
+	const bool bChanged = !TutorialInput->GetText().EqualTo(Input);
+	if (bHasGamepadA && !TutorialGamepadInput)
+	{
+		if (auto* Column = Cast<UVerticalBox>(TutorialInput->GetParent()))
+		{
+			TutorialGamepadInput = WidgetTree->ConstructWidget<UHorizontalBox>(
+			    UHorizontalBox::StaticClass(), TEXT("TutorialGamepadInput"));
+			const auto* TextSlot = CastChecked<UVerticalBoxSlot>(TutorialInput->Slot);
+			Column->AddChildToVerticalBox(TutorialGamepadInput)->SetPadding(TextSlot->GetPadding());
+		}
+	}
+	const bool bUseButtonIcon = bHasGamepadA && TutorialGamepadInput;
+	TutorialInput->SetText(
+	    bHasGamepadA && !bUseButtonIcon ? FText::FromString(Line.Replace(GamepadAToken, TEXT("GAMEPAD A"))) : Input);
+	TutorialInput->SetVisibility(bUseButtonIcon ? ESlateVisibility::Collapsed : InputVisibility);
+	TutorialInput->SetRenderOpacity(Opacity);
+	if (!TutorialGamepadInput)
+	{
+		return;
+	}
+	TutorialGamepadInput->SetVisibility(bUseButtonIcon ? InputVisibility : ESlateVisibility::Collapsed);
+	TutorialGamepadInput->SetRenderOpacity(Opacity);
+	if (!bUseButtonIcon || (!bChanged && TutorialGamepadInput->GetChildrenCount() > 0))
+	{
+		return;
+	}
+
+	TutorialGamepadInput->ClearChildren();
+	const auto MakeText = [this](const FText& Text, const FSlateFontInfo& Font)
+	{
+		auto* Label = WidgetTree->ConstructWidget<UTextBlock>();
+		Label->SetText(Text);
+		Label->SetFont(Font);
+		Label->SetColorAndOpacity(TutorialInput->GetColorAndOpacity());
+		Label->SetShadowOffset(TutorialInput->GetShadowOffset());
+		Label->SetShadowColorAndOpacity(TutorialInput->GetShadowColorAndOpacity());
+		return Label;
+	};
+	TArray<FString> Parts;
+	Line.ParseIntoArray(Parts, GamepadAToken, false);
+	for (int32 Index = 0; Index < Parts.Num(); ++Index)
+	{
+		if (Index > 0)
+		{
+			constexpr float Diameter = 21.0f;
+			auto* Badge = WidgetTree->ConstructWidget<USizeBox>();
+			Badge->SetWidthOverride(Diameter);
+			Badge->SetHeightOverride(Diameter);
+			auto* Outline = WidgetTree->ConstructWidget<UBorder>();
+			Outline->SetBrush(FSlateRoundedBoxBrush(
+			    FLinearColor::Transparent, TutorialInput->GetColorAndOpacity(), 1.5f, FVector2D(Diameter)));
+			Outline->SetPadding(FMargin(0.0f));
+			Outline->SetHorizontalAlignment(HAlign_Center);
+			Outline->SetVerticalAlignment(VAlign_Center);
+			FSlateFontInfo Font = TutorialInput->GetFont();
+			Font.Size = 13.0f;
+			Outline->SetContent(MakeText(FText::FromString(TEXT("A")), Font));
+			Badge->SetContent(Outline);
+			TutorialGamepadInput->AddChildToHorizontalBox(Badge)->SetVerticalAlignment(VAlign_Center);
+		}
+		if (!Parts[Index].IsEmpty())
+		{
+			TutorialGamepadInput
+			    ->AddChildToHorizontalBox(MakeText(FText::FromString(Parts[Index]), TutorialInput->GetFont()))
+			    ->SetVerticalAlignment(VAlign_Center);
+		}
+	}
 }
 
 bool UDBPlayerHUDWidget::ShowParryLesson(UDBCombatComponent* Attacker, const FVector& ImpactPoint)
