@@ -14,8 +14,9 @@ Unreal Engine 5와 C++로 개발한 3인칭 싱글플레이 액션 게임입니�
 
 ### 1. 언리얼 게임플레이 프레임워크 활용과 전투 시스템 설계
 
-**플레이어와 적 AI가 동일한 공격 실행 및 타격 판정 로직을 사용하도록 구성했습니다.**
+<br>
 
+**플레이어와 적 AI가 동일한 공격 실행 및 타격 판정 로직을 사용하도록 구성**
 플레이어와 적 캐릭터는 언리얼 엔진의 `ACharacter`를 상속하고, 각 클래스의 생성자에서 `CreateDefaultSubobject()`를 사용해 직접 구현한 `UDBCombatComponent`와 `UDBHealthComponent`를 생성합니다.
 
 플레이어는 Enhanced Input을 통해 공격을 요청하고, 적 AI는 Behavior Tree에서 공격을 선택해 각자의 전투 컴포넌트에 전달합니다. 두 캐릭터는 동일한 전투 컴포넌트 클래스를 사용하므로 무기 데이터 조회, 공격 몽타주 재생, 타격 판정 로직을 재사용할 수 있습니다.
@@ -23,6 +24,8 @@ Unreal Engine 5와 C++로 개발한 3인칭 싱글플레이 액션 게임입니�
 피해를 적용할 때는 언리얼 엔진의 `ApplyPointDamage()`를 호출합니다. 피격 캐릭터의 `TakeDamage()`에서는 전달받은 피해 정보를 자신의 체력 컴포넌트에 전달합니다.
 
 [플레이어](Source/DeftBlade/Character/DBPlayerCharacter.cpp) · [적 캐릭터](Source/DeftBlade/Character/DBEnemyCharacter.cpp) · [공격 태스크](Source/DeftBlade/AI/BTTask_DBMeleeAttack.cpp)
+
+<br>
 
 **플레이어와 적의 공격 요청 및 처리 흐름**
 
@@ -38,6 +41,8 @@ flowchart TD
     class C focus
 ```
 
+<br>
+
 **주요 클래스의 역할**
 
 | 객체 | 역할 |
@@ -46,6 +51,8 @@ flowchart TD
 | `ADBEnemyAIController` | `OnPossess()`에서 인식 이벤트를 연결하고 Behavior Tree를 실행합니다. 적이 관측한 정보와 전투 중 이동할 목표 위치를 Blackboard에 저장합니다. |
 | `UDBWeaponData`와 `UDBCombatComponent` | Data Asset에는 공격 몽타주, 타격 구간, 후속 공격 ID 등의 설정을 저장합니다. 전투 컴포넌트에서는 현재 공격 정보, 대기 중인 입력, 접촉을 처리한 대상 등 캐릭터마다 달라지는 데이터를 관리합니다. |
 | `ADBGameMode`와 `ADBCombatEncounter` | GameMode는 `RestartPlayer()`에서 보스 재도전 시 플레이어의 스폰 위치를 결정합니다. Encounter는 전투 구역의 진행 상황을 관리하고 보스 재도전에 필요한 상태를 복원합니다. |
+
+<br>
 
 **멀티캐스트 델리게이트를 활용한 이벤트 처리**
 
@@ -56,6 +63,8 @@ flowchart TD
 [체력](Source/DeftBlade/Combat/DBHealthComponent.cpp) · [HUD](Source/DeftBlade/UI/DBPlayerHUDWidget.cpp) · [전투 구역](Source/DeftBlade/Game/DBCombatEncounter.cpp) · [GameMode](Source/DeftBlade/Game/DBGameMode.cpp)
 
 ### 2. 데이터 기반 콤보 시스템과 입력 버퍼
+
+<br>
 
 **공격 데이터와 콤보 분기**
 
@@ -69,6 +78,8 @@ flowchart TD
 
 [공격 정의](Source/DeftBlade/Combat/DBWeaponData.h) · [전투 컴포넌트](Source/DeftBlade/Combat/DBCombatComponent.cpp)
 
+<br>
+
 **입력 버퍼와 입력 우선순위**
 
 공격 도중 다음 공격이나 회피 입력을 받으면, 해당 동작을 즉시 실행할 수 없는 경우에도 입력을 저장해 두었다가 실행 가능한 시점에 처리하도록 입력 버퍼를 구현했습니다.
@@ -77,9 +88,13 @@ flowchart TD
 
 동작이 진행되는 동안에는 미리 받은 입력을 유지하고, 실행 중인 동작이 없을 때 입력의 유효 시간이 지났는지 검사합니다. 입력 횟수와 관계없이 한 건의 요청만 저장하므로 입력 버퍼의 공간 복잡도는 O(1)입니다.
 
+<br>
+
 **무기 교체 콤보**
 
 무기 교체 입력은 입력 버퍼에 저장합니다. 현재 프레임의 타격 판정을 먼저 처리한 뒤 몽타주의 재생 위치가 `ComboStart`에 도달하면 후속 몽타주의 재생을 시도합니다. 후속 몽타주 재생에 성공한 경우에만 무기 프로필의 교체를 확정합니다.
+
+<br>
 
 **무기 교체 입력에서 후속 공격까지의 처리 순서**
 
@@ -92,6 +107,8 @@ flowchart LR
     class S focus
 ```
 
+<br>
+
 **이전 공격의 종료 콜백 처리**
 
 콤보로 새로운 공격이 시작된 이후에도 이전 공격의 몽타주 종료 콜백이 전달될 수 있습니다. 이때 이전 공격의 종료 콜백에서 현재 실행 중인 공격을 종료하면 이미 시작된 후속 공격이 의도치 않게 중단될 수 있습니다.
@@ -101,6 +118,8 @@ flowchart LR
 몽타주 인스턴스 ID는 현재 실행 중인 몽타주의 재생 위치를 조회하는 데 사용합니다.
 
 ### 3. 애니메이션 기반 타격 판정과 실행 순서
+
+<br>
 
 **프레임 간 몽타주 재생 구간을 이용한 타격 판정**
 
@@ -116,6 +135,8 @@ flowchart LR
 
 [타격 처리](Source/DeftBlade/Combat/DBCombatComponent.cpp)
 
+<br>
+
 **한 프레임에서 유효 타격 구간을 건너뛰는 사례**
 
 ```mermaid
@@ -128,6 +149,8 @@ flowchart LR
     linkStyle 1 stroke:#b05275,stroke-width:3px
 ```
 
+<br>
+
 **몽타주 종료 시 마지막 타격 판정 누락 방지**
 
 언리얼 엔진의 `USkeletalMeshComponent::FinalizeBoneTransform()`은 본 트랜스폼 갱신을 완료한 후 대기 중인 애니메이션 이벤트를 처리하고, 이어 `OnBoneTransformsFinalizedMC` 멀티캐스트 델리게이트를 브로드캐스트합니다.
@@ -139,6 +162,8 @@ flowchart LR
 이를 방지하기 위해 몽타주가 끝까지 재생되어 종료된 경우에는 `AttackEnded()`에서 `bAttackEndedPending` 플래그를 설정해 공격 종료를 보류합니다. 이후 `BonesFinalized()`에서 몽타주 종료 시점까지 남은 구간의 타격 판정을 수행한 뒤, 연계 공격으로 전환하거나 현재 공격을 종료합니다.
 
 반면 피격 등으로 몽타주가 도중에 중단된 경우에는 추가 타격 판정 없이 즉시 공격을 종료합니다.
+
+<br>
 
 **샘플링 횟수 제한과 중복 피해 방지**
 
@@ -186,6 +211,8 @@ flowchart LR
 
 [AI 컨트롤러](Source/DeftBlade/AI/DBEnemyAIController.cpp)
 
+<br>
+
 **접근 위치 배정과 공격 시작 조건**
 
 ```mermaid
@@ -196,6 +223,8 @@ flowchart TD
     classDef focus fill:#f7e9ee,stroke:#a34f70,color:#56253a
     class D focus
 ```
+
+<br>
 
 **근접 공격 후보 선정**
 
@@ -215,6 +244,8 @@ flowchart TD
 
 이를 통해 플레이어와의 거리가 조금 달라질 때마다 근접 공격 후보가 바뀌는 현상을 줄이고, 공격을 진행 중이거나 교전 중인 적이 근접 위치를 우선적으로 유지하도록 했습니다.
 
+<br>
+
 **적의 이동 목표 결정**
 
 `GetCombatLocation()`은 `GetAttackRange()`로 조회한 각 적의 공격 사거리를 기준으로 이동 목표를 결정합니다. 근접 공격 후보로 선정된 적은 자신의 공격 사거리 안에서, 나머지 적은 그보다 바깥쪽에서 이동할 위치를 찾습니다.
@@ -222,6 +253,8 @@ flowchart TD
 현재 위치나 이전에 설정한 이동 목표가 여전히 유효하다면 해당 위치를 재사용합니다.
 
 새로운 이동 목표가 필요한 경우에는 플레이어 주변의 여러 각도에서 후보 위치를 계산하고, 각 위치를 NavMesh에 투영합니다. 다른 적과의 간격을 확보할 수 있는지, 실제로 이동 가능한 경로가 존재하는지 검사해 이동 목표를 결정합니다. 조건을 만족하는 위치를 찾지 못하면 현재 위치를 유지합니다.
+
+<br>
 
 **공격 시작 조건**
 
@@ -235,6 +268,8 @@ flowchart TD
 같은 플레이어를 추적하는 다른 적의 공격 요청이 입력 버퍼에 저장되어 있다면 새로운 공격을 시작하지 않습니다. 다른 적이 이미 공격을 진행 중인 경우에는 해당 공격의 마지막 타격 구간과 이후 설정된 짧은 대기 시간이 모두 지난 뒤에 새로운 공격을 시작할 수 있습니다.
 
 이와 같이 공격 사거리 안으로 접근할 적의 수와 실제 공격이 시작되는 시점을 별도로 제어합니다.
+
+<br>
 
 **연산 비용과 확장 시 고려 사항**
 
