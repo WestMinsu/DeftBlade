@@ -53,15 +53,6 @@ foreach ($path in $paths) {
         $errorsFound.Add('Not approved for publication: ' + $path)
         continue
     }
-    if ($path -ceq 'README.md') {
-        $readmeSize = & git cat-file -s ($revisionPrefix + $path)
-        if ($LASTEXITCODE -ne 0) {
-            $errorsFound.Add('Could not inspect README.md.')
-        } elseif ([long]$readmeSize -ne 0) {
-            $errorsFound.Add('README.md must remain empty until documentation is requested.')
-        }
-        continue
-    }
     $blob = @(& git show --no-textconv ($revisionPrefix + $path))
     if ($LASTEXITCODE -ne 0) {
         $errorsFound.Add('Could not inspect staged/committed file: ' + $path)
